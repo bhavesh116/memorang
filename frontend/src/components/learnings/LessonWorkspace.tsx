@@ -38,6 +38,9 @@ export default function LessonWorkspace({ learning }: Props) {
   const [requestingHint, setRequestingHint] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [coachDrawerOpen, setCoachDrawerOpen] = useState(false);
+  const [chartHoveredObjectiveTitle, setChartHoveredObjectiveTitle] =
+    useState<string | null>(null);
+  const [detailObjectiveTitle, setDetailObjectiveTitle] = useState<string | null>(null);
   const [activeQuestionId, setActiveQuestionId] = useState<string | null>(null);
   const [selectedChoiceIndex, setSelectedChoiceIndex] = useState<number | null>(null);
   const [feedback, setFeedback] = useState<{
@@ -408,6 +411,21 @@ export default function LessonWorkspace({ learning }: Props) {
     return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
   }
 
+  function renderMetricInfo(description: string, label: string) {
+    return (
+      <button
+        type="button"
+        className="lesson-metric-info"
+        aria-label={`${label}: ${description}`}
+      >
+        <Info size={14} />
+        <span className="lesson-metric-tooltip" role="tooltip">
+          {description}
+        </span>
+      </button>
+    );
+  }
+
   function renderSummary() {
     if (!workspace?.summary) return null;
     const summary: LessonSummary = workspace.summary;
@@ -429,39 +447,30 @@ export default function LessonWorkspace({ learning }: Props) {
             <div className="lesson-summary-value">{summary.mastery_index}%</div>
             <div className="lesson-summary-label lesson-summary-label-with-info">
               <span>Mastery Index</span>
-              <span
-                className="lesson-metric-info"
-                title="The share of objectives you cleared without any wrong attempts."
-                aria-label="Mastery Index info"
-              >
-                <Info size={14} />
-              </span>
+              {renderMetricInfo(
+                'The share of objectives you cleared without any wrong attempts.',
+                'Mastery Index',
+              )}
             </div>
           </div>
           <div className="lesson-summary-card">
             <div className="lesson-summary-value">{summary.weighted_score}%</div>
             <div className="lesson-summary-label lesson-summary-label-with-info">
               <span>Weighted Score</span>
-              <span
-                className="lesson-metric-info"
-                title="A weighted performance score that penalizes wrong attempts and hint usage more heavily on higher-weight questions."
-                aria-label="Weighted Score info"
-              >
-                <Info size={14} />
-              </span>
+              {renderMetricInfo(
+                'A weighted performance score that penalizes wrong attempts and hint usage more heavily on higher-weight questions.',
+                'Weighted Score',
+              )}
             </div>
           </div>
           <div className="lesson-summary-card">
             <div className="lesson-summary-value">{summary.readiness_score}%</div>
             <div className="lesson-summary-label lesson-summary-label-with-info">
               <span>Readiness Score</span>
-              <span
-                className="lesson-metric-info"
-                title="An overall readiness estimate combining weighted score, mastery index, and friction zones."
-                aria-label="Readiness Score info"
-              >
-                <Info size={14} />
-              </span>
+              {renderMetricInfo(
+                'An overall readiness estimate combining weighted score, mastery index, and friction zones.',
+                'Readiness Score',
+              )}
             </div>
           </div>
         </div>
@@ -513,7 +522,13 @@ export default function LessonWorkspace({ learning }: Props) {
           </div>
 
           <div className="lesson-chart-card">
-            <h4>Friction Zones</h4>
+            <h4 className="lesson-chart-heading-with-info">
+              <span>Friction Zones</span>
+              {renderMetricInfo(
+                'Questions that triggered repeated hint usage, indicating the areas where you needed the most support.',
+                'Friction Zones',
+              )}
+            </h4>
             {summary.friction_zones.length === 0 ? (
               <p className="lesson-summary-empty">
                 No friction zones were detected in this run.
@@ -553,17 +568,33 @@ export default function LessonWorkspace({ learning }: Props) {
     objectiveCoverage: LessonObjectiveMetric[],
     maxObjectiveScore: number,
   ) {
+    const detailObjective =
+      objectiveCoverage.find(
+        (objective) => objective.objective_title === detailObjectiveTitle,
+      ) ?? objectiveCoverage[0] ?? null;
     const size = 260;
     const center = size / 2;
     const radius = 88;
     const levels = [25, 50, 75, 100];
-    const points = objectiveCoverage.map((objective: LessonObjectiveMetric, index: number) => {
-      const angle = (Math.PI * 2 * index) / objectiveCoverage.length - Math.PI / 2;
-      const scaledRadius = radius * (objective.mastery_score / maxObjectiveScore);
-      const x = center + Math.cos(angle) * scaledRadius;
-      const y = center + Math.sin(angle) * scaledRadius;
-      return `${x},${y}`;
-    });
+    const radarPoints = objectiveCoverage.map(
+      (objective: LessonObjectiveMetric, index: number) => {
+        const angle =
+          (Math.PI * 2 * index) / objectiveCoverage.length - Math.PI / 2;
+        const scaledRadius = radius * (objective.mastery_score / maxObjectiveScore);
+        const x = center + Math.cos(angle) * scaledRadius;
+        const y = center + Math.sin(angle) * scaledRadius;
+        return {
+          objective,
+          x,
+          y,
+        };
+      },
+    );
+    const points = radarPoints.map((point) => `${point.x},${point.y}`);
+    const hoveredRadarPoint =
+      radarPoints.find(
+        (point) => point.objective.objective_title === chartHoveredObjectiveTitle,
+      ) ?? null;
 
     return (
       <div className="lesson-radar-card">
@@ -607,33 +638,98 @@ export default function LessonWorkspace({ learning }: Props) {
 
           <polygon points={points.join(' ')} className="lesson-radar-shape" />
 
-          {objectiveCoverage.map((objective: LessonObjectiveMetric, index: number) => {
-            const angle =
-              (Math.PI * 2 * index) / objectiveCoverage.length - Math.PI / 2;
-            const scaledRadius = radius * (objective.mastery_score / maxObjectiveScore);
-            const x = center + Math.cos(angle) * scaledRadius;
-            const y = center + Math.sin(angle) * scaledRadius;
+          {radarPoints.map(({ objective, x, y }) => {
             return (
-              <circle
-                key={`${objective.objective_title}-point`}
-                cx={x}
-                cy={y}
-                r="4"
-                className="lesson-radar-point"
-              />
+              <g key={`${objective.objective_title}-point`}>
+                <circle
+                  cx={x}
+                  cy={y}
+                  r="12"
+                  className="lesson-radar-hit-area"
+                  onMouseEnter={() =>
+                    setChartHoveredObjectiveTitle(objective.objective_title)
+                  }
+                  onFocus={() =>
+                    setChartHoveredObjectiveTitle(objective.objective_title)
+                  }
+                  onMouseLeave={() => setChartHoveredObjectiveTitle(null)}
+                />
+                <circle
+                  cx={x}
+                  cy={y}
+                  r="4"
+                  className={`lesson-radar-point ${
+                    chartHoveredObjectiveTitle === objective.objective_title
+                      ? 'lesson-radar-point-active'
+                      : ''
+                  }`}
+                />
+              </g>
             );
           })}
         </svg>
 
+        {hoveredRadarPoint ? (
+          <div
+            className="lesson-radar-chart-tooltip"
+            style={{
+              left: `${(hoveredRadarPoint.x / size) * 100}%`,
+              top: `${(hoveredRadarPoint.y / size) * 100}%`,
+            }}
+          >
+            <strong>{hoveredRadarPoint.objective.objective_title}</strong>
+          </div>
+        ) : null}
+
         <div className="lesson-radar-legend">
           {objectiveCoverage.map((objective: LessonObjectiveMetric) => (
-            <div key={objective.objective_title} className="lesson-radar-legend-item">
+            <button
+              key={objective.objective_title}
+              type="button"
+              className={`lesson-radar-legend-item ${
+                detailObjective?.objective_title === objective.objective_title
+                  ? 'lesson-radar-legend-item-active'
+                  : ''
+              }`}
+              onMouseEnter={() => setDetailObjectiveTitle(objective.objective_title)}
+              onFocus={() => setDetailObjectiveTitle(objective.objective_title)}
+            >
               <span className="lesson-radar-dot" />
               <span>{objective.objective_title}</span>
               <strong>{objective.mastery_score}%</strong>
-            </div>
+            </button>
           ))}
         </div>
+
+        {detailObjective ? (
+          <div className="lesson-radar-detail">
+            <div className="lesson-radar-detail-title">
+              {detailObjective.objective_title}
+            </div>
+            <div className="lesson-radar-detail-grid">
+              <div className="lesson-radar-detail-item">
+                <span>Mastery</span>
+                <strong>{detailObjective.mastery_score}%</strong>
+              </div>
+              <div className="lesson-radar-detail-item">
+                <span>Correct attempts</span>
+                <strong>{detailObjective.correct_attempt_count}</strong>
+              </div>
+              <div className="lesson-radar-detail-item">
+                <span>Wrong attempts</span>
+                <strong>{detailObjective.wrong_attempt_count}</strong>
+              </div>
+              <div className="lesson-radar-detail-item">
+                <span>Avg. response time</span>
+                <strong>{formatDuration(detailObjective.avg_response_time_ms)}</strong>
+              </div>
+              <div className="lesson-radar-detail-item">
+                <span>Total weight</span>
+                <strong>{detailObjective.total_weightage}</strong>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
     );
   }

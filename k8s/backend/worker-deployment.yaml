@@ -1,135 +1,37 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: backend-worker
+  name: memorang-worker
   namespace: memorang
   labels:
-    app: backend-worker
+    app: memorang-worker
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: backend-worker
+      app: memorang-worker
   template:
     metadata:
       labels:
-        app: backend-worker
+        app: memorang-worker
     spec:
+      imagePullSecrets:
+        - name: acr-secret
       nodeSelector:
         kubernetes.io/arch: arm64
       containers:
-        - name: backend-worker
-          image: ghcr.io/YOUR_ORG/memorang-backend:latest
+        - name: memorang-worker
+          image: tickertom.azurecr.io/memorang-backend:dev-ai
           imagePullPolicy: Always
-          command: ["node", "dist/temporal/worker"]
+          command: ["doppler", "run", "--", "node", "dist/temporal/worker"]
           env:
+            - name: DOPPLER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: doppler-tokens
+                  key: WORKER_DOPPLER_TOKEN
             - name: NODE_ENV
               value: production
-            - name: SUPABASE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: backend-secrets
-                  key: SUPABASE_URL
-            - name: SUPABASE_SERVICE_ROLE_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: backend-secrets
-                  key: SUPABASE_SERVICE_ROLE_KEY
-            - name: AZURE_STORAGE_CONNECTION_STRING
-              valueFrom:
-                secretKeyRef:
-                  name: backend-secrets
-                  key: AZURE_STORAGE_CONNECTION_STRING
-            - name: AZURE_STORAGE_PDF_CONTAINER
-              valueFrom:
-                secretKeyRef:
-                  name: backend-secrets
-                  key: AZURE_STORAGE_PDF_CONTAINER
-            - name: AZURE_STORAGE_IMAGE_CONTAINER
-              valueFrom:
-                secretKeyRef:
-                  name: backend-secrets
-                  key: AZURE_STORAGE_IMAGE_CONTAINER
-            - name: AZURE_OPENAI_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: backend-secrets
-                  key: AZURE_OPENAI_API_KEY
-            - name: AZURE_OPENAI_ENDPOINT
-              valueFrom:
-                secretKeyRef:
-                  name: backend-secrets
-                  key: AZURE_OPENAI_ENDPOINT
-            - name: AZURE_OPENAI_API_VERSION
-              valueFrom:
-                secretKeyRef:
-                  name: backend-secrets
-                  key: AZURE_OPENAI_API_VERSION
-            - name: AZURE_OPENAI_DEPLOYMENT_NAME
-              valueFrom:
-                secretKeyRef:
-                  name: backend-secrets
-                  key: AZURE_OPENAI_DEPLOYMENT_NAME
-            - name: AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME
-              valueFrom:
-                secretKeyRef:
-                  name: backend-secrets
-                  key: AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME
-            - name: AZURE_DOCUMENT_INTELLIGENCE_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: backend-secrets
-                  key: AZURE_DOCUMENT_INTELLIGENCE_KEY
-            - name: AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT
-              valueFrom:
-                secretKeyRef:
-                  name: backend-secrets
-                  key: AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT
-            - name: AZURE_DOCUMENT_INTELLIGENCE_API_VERSION
-              valueFrom:
-                secretKeyRef:
-                  name: backend-secrets
-                  key: AZURE_DOCUMENT_INTELLIGENCE_API_VERSION
-            - name: TEMPORAL_ADDRESS
-              valueFrom:
-                secretKeyRef:
-                  name: backend-secrets
-                  key: TEMPORAL_ADDRESS
-            - name: TEMPORAL_NAMESPACE
-              valueFrom:
-                secretKeyRef:
-                  name: backend-secrets
-                  key: TEMPORAL_NAMESPACE
-            - name: TEMPORAL_TASK_QUEUE
-              valueFrom:
-                secretKeyRef:
-                  name: backend-secrets
-                  key: TEMPORAL_TASK_QUEUE
-            - name: LANGGRAPH_POSTGRES_URL
-              valueFrom:
-                secretKeyRef:
-                  name: backend-secrets
-                  key: LANGGRAPH_POSTGRES_URL
-            - name: LANGGRAPH_POSTGRES_SCHEMA
-              valueFrom:
-                secretKeyRef:
-                  name: backend-secrets
-                  key: LANGGRAPH_POSTGRES_SCHEMA
-            - name: LANGSMITH_TRACING
-              valueFrom:
-                secretKeyRef:
-                  name: backend-secrets
-                  key: LANGSMITH_TRACING
-            - name: LANGSMITH_PROJECT
-              valueFrom:
-                secretKeyRef:
-                  name: backend-secrets
-                  key: LANGSMITH_PROJECT
-            - name: LANGSMITH_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: backend-secrets
-                  key: LANGSMITH_API_KEY
           resources:
             requests:
               cpu: "200m"

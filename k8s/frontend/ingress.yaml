@@ -1,7 +1,7 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: frontend
+  name: memorang-frontend
   namespace: memorang
   annotations:
     nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
@@ -15,7 +15,7 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: frontend
+                name: memorang-frontend
                 port:
                   number: 80
   tls:

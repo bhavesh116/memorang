@@ -8,31 +8,26 @@ COPY package*.json ./
 RUN npm ci --frozen-lockfile
 
 COPY . .
-
-# Pass build-time env vars (set in CI as build-args)
-ARG VITE_SUPABASE_URL
-ARG VITE_SUPABASE_ANON_KEY
-ARG VITE_BACKEND_URL
-
-ENV VITE_SUPABASE_URL=$VITE_SUPABASE_URL
-ENV VITE_SUPABASE_ANON_KEY=$VITE_SUPABASE_ANON_KEY
-ENV VITE_BACKEND_URL=$VITE_BACKEND_URL
-
 RUN npm run build
 
-# ── Stage 2: Serve with nginx ─────────────────────────────────────────────────
+# ── Stage 2: Serve with nginx + Doppler runtime config ────────────────────────
 FROM nginx:1.27-alpine AS runner
+
+RUN apk add --no-cache wget ca-certificates jq && \
+    wget -qO- https://cli.doppler.com/install.sh | sh
 
 # Remove default nginx config
 RUN rm /etc/nginx/conf.d/default.conf
 
-# Copy custom config and built assets
 COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY docker/start-nginx-with-doppler.sh /usr/local/bin/start-nginx-with-doppler.sh
 COPY --from=builder /app/dist /usr/share/nginx/html
+
+RUN chmod +x /usr/local/bin/start-nginx-with-doppler.sh
 
 EXPOSE 80
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
   CMD wget -qO- http://localhost:80/ || exit 1
 
-CMD ["nginx", "-g", "daemon off;"]
+CMD ["doppler", "run", "--", "/usr/local/bin/start-nginx-with-doppler.sh"]

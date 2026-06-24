@@ -1,5 +1,6 @@
 /// <reference types="vite/client" />
 import { getAccessToken } from './supabase';
+import { appConfig } from './runtimeConfig';
 import type {
   LessonWorkspace,
   Learning,
@@ -8,7 +9,7 @@ import type {
   StudyWorkspace,
 } from '@/types/learning';
 
-const BACKEND_URL = (import.meta.env.VITE_BACKEND_URL as string) || 'http://localhost:3001';
+const BACKEND_URL = appConfig.backendUrl || 'http://localhost:3001';
 
 // ── Core fetch helper ─────────────────────────────────────────────────────────
 

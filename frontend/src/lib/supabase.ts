@@ -1,8 +1,9 @@
 /// <reference types="vite/client" />
 import { createClient } from '@supabase/supabase-js';
+import { appConfig } from './runtimeConfig';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+const supabaseUrl = appConfig.supabaseUrl;
+const supabaseAnonKey = appConfig.supabaseAnonKey;
 
 if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error(

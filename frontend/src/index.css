@@ -1309,6 +1309,7 @@ input, textarea { font-family: inherit; }
 }
 
 .lesson-metric-info {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1319,13 +1320,56 @@ input, textarea { font-family: inherit; }
   background: rgba(255,255,255,0.05);
   border: 1px solid rgba(255,255,255,0.08);
   cursor: help;
+  padding: 0;
   transition: color 0.18s ease, border-color 0.18s ease, background 0.18s ease;
 }
 
-.lesson-metric-info:hover {
+.lesson-metric-info:hover,
+.lesson-metric-info:focus-visible {
   color: var(--text-primary);
   border-color: rgba(124,58,237,0.35);
   background: rgba(124,58,237,0.14);
+  outline: none;
+}
+
+.lesson-metric-tooltip {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 0.55rem);
+  transform: translateX(-50%) translateY(6px);
+  width: min(220px, 50vw);
+  padding: 0.55rem 0.65rem;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.98);
+  border: 1px solid rgba(255,255,255,0.1);
+  color: var(--text-secondary);
+  font-size: 0.74rem;
+  line-height: 1.45;
+  text-transform: none;
+  letter-spacing: normal;
+  white-space: normal;
+  box-shadow: 0 14px 30px rgba(2, 6, 23, 0.32);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.16s ease, transform 0.16s ease;
+  z-index: 5;
+}
+
+.lesson-metric-tooltip::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  transform: translateX(-50%);
+  border-width: 6px;
+  border-style: solid;
+  border-color: rgba(15, 23, 42, 0.98) transparent transparent transparent;
+}
+
+.lesson-metric-info:hover .lesson-metric-tooltip,
+.lesson-metric-info:focus-visible .lesson-metric-tooltip {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
 }
 
 .lesson-chart-card {
@@ -1347,6 +1391,7 @@ input, textarea { font-family: inherit; }
 .lesson-radar-card {
   display: grid;
   gap: 1rem;
+  position: relative;
 }
 
 .lesson-radar-svg {
@@ -1377,6 +1422,39 @@ input, textarea { font-family: inherit; }
   fill: #8b5cf6;
 }
 
+.lesson-radar-point-active {
+  fill: #c084fc;
+}
+
+.lesson-radar-hit-area {
+  fill: transparent;
+  cursor: pointer;
+}
+
+.lesson-radar-chart-tooltip {
+  position: absolute;
+  transform: translate(-50%, calc(-100% - 14px));
+  min-width: 170px;
+  max-width: 220px;
+  padding: 0.65rem 0.75rem;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.98);
+  border: 1px solid rgba(255,255,255,0.1);
+  box-shadow: 0 14px 30px rgba(2, 6, 23, 0.34);
+  display: grid;
+  gap: 0.2rem;
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+  line-height: 1.45;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.lesson-radar-chart-tooltip strong {
+  color: var(--text-primary);
+  font-size: 0.82rem;
+}
+
 .lesson-radar-legend {
   display: grid;
   gap: 0.55rem;
@@ -1389,6 +1467,23 @@ input, textarea { font-family: inherit; }
   align-items: center;
   font-size: 0.82rem;
   color: var(--text-secondary);
+  width: 100%;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: var(--radius);
+  background: rgba(255,255,255,0.03);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
+}
+
+.lesson-radar-legend-item:hover,
+.lesson-radar-legend-item:focus-visible,
+.lesson-radar-legend-item-active {
+  border-color: rgba(124,58,237,0.35);
+  background: rgba(124,58,237,0.1);
+  color: var(--text-primary);
+  outline: none;
 }
 
 .lesson-radar-dot {
@@ -1396,6 +1491,40 @@ input, textarea { font-family: inherit; }
   height: 10px;
   border-radius: 50%;
   background: #8b5cf6;
+}
+
+.lesson-radar-detail {
+  padding: 0.95rem 1rem;
+  border-radius: var(--radius);
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.08);
+}
+
+.lesson-radar-detail-title {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 0.75rem;
+}
+
+.lesson-radar-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.lesson-radar-detail-item {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.lesson-radar-detail-item span {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.lesson-radar-detail-item strong {
+  color: var(--text-primary);
 }
 
 .lesson-radar-row,
