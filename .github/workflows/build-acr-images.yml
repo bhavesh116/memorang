@@ -3,7 +3,7 @@ name: Build & Push ACR Images
 on:
   push:
     branches:
-      - dev-ai
+      - master
     paths:
       - "frontend/**"
       - "backend/**"
