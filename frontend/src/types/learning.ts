@@ -121,7 +121,7 @@ export interface LessonSummary {
     question_id: string;
     objective_title: string;
     order_index: number;
-    hint_requests: number;
+    wrong_attempt_count: number;
     page_refs: Array<number | string>;
   }>;
   objective_coverage: LessonObjectiveMetric[];
@@ -152,7 +152,6 @@ export interface Learning {
   pdf_blob_name?: string | null;
   ingestion_status: IngestionStatus;
   ingestion_progress_pct?: number | null;
-  ingestion_eta_seconds?: number | null;
   ingestion_error?: string | null;
   ingestion_started_at?: string | null;
   ingestion_completed_at?: string | null;

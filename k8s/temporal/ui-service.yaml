@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: memorang-temporal-ui-svc-prod
+spec:
+  selector:
+    app: memorang-temporal-ui-prod
+  ports:
+  - name: temp-ui-svc-port
+    protocol: TCP
+    port: 80
+    targetPort: temp-ui-port

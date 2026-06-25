@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: memorang-temporal-deploy-prod
+  labels:
+    app: memorang-temporal-prod
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app: memorang-temporal-prod
+  template:
+    metadata:
+      labels:
+        app: memorang-temporal-prod
+    spec:
+      nodeSelector:
+        node-type: regular
+      containers:
+      - name: memorang-temporal-prod
+        image: temporalio/auto-setup:1.25.2
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 7233
+          name: temp-grpc-port
+        env:
+        - name: DB
+          value: postgres12
+        - name: DB_PORT
+          valueFrom:
+            secretKeyRef:
+              name: memorang-temporal-postgres-secret
+              key: POSTGRES_PORT
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: memorang-temporal-postgres-secret
+              key: POSTGRES_USER
+        - name: POSTGRES_PWD
+          valueFrom:
+            secretKeyRef:
+              name: memorang-temporal-postgres-secret
+              key: POSTGRES_PASSWORD
+        - name: POSTGRES_SEEDS
+          valueFrom:
+            secretKeyRef:
+              name: memorang-temporal-postgres-secret
+              key: POSTGRES_HOST
+        - name: SQL_TLS_ENABLED
+          value: "true"
+        - name: SQL_MAX_CONNS
+          value: "4"
+        - name: SQL_MAX_IDLE_CONNS
+          value: "4"
+        - name: SQL_VIS_MAX_CONNS
+          value: "4"
+        - name: SQL_VIS_MAX_IDLE_CONNS
+          value: "4"
+        - name: NUM_HISTORY_SHARDS
+          value: "4"
+        readinessProbe:
+          tcpSocket:
+            port: temp-grpc-port
+          initialDelaySeconds: 45
+          periodSeconds: 10
+        livenessProbe:
+          tcpSocket:
+            port: temp-grpc-port
+          initialDelaySeconds: 90
+          periodSeconds: 20

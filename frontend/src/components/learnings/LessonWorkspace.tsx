@@ -4,7 +4,8 @@ import { createPortal } from 'react-dom';
 import {
   Bot,
   CheckCircle2,
-  HelpCircle,
+  ChevronDown,
+  ChevronUp,
   Image as ImageIcon,
   Info,
   Loader2,
@@ -14,6 +15,7 @@ import {
   X,
 } from 'lucide-react';
 import Button from '@/components/ui/Button';
+import Modal from '@/components/ui/Modal';
 import { AppDispatch } from '@/store';
 import { fetchLearningById } from '@/store/learningsSlice';
 import { api } from '@/lib/api';
@@ -29,13 +31,14 @@ interface Props {
   learning: Learning;
 }
 
+type StudyPlanDifficulty = 'Easy' | 'Intermediate' | 'Hard';
+
 export default function LessonWorkspace({ learning }: Props) {
   const dispatch = useDispatch<AppDispatch>();
   const [workspace, setWorkspace] = useState<LessonWorkspaceType | null>(null);
   const [loading, setLoading] = useState(false);
   const [startingLesson, setStartingLesson] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [requestingHint, setRequestingHint] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [coachDrawerOpen, setCoachDrawerOpen] = useState(false);
   const [chartHoveredObjectiveTitle, setChartHoveredObjectiveTitle] =
@@ -53,6 +56,14 @@ export default function LessonWorkspace({ learning }: Props) {
   } | null>(null);
   const [coachDraft, setCoachDraft] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [regenerateSetupOpen, setRegenerateSetupOpen] = useState(false);
+  const [selectedDifficulty, setSelectedDifficulty] =
+    useState<StudyPlanDifficulty>('Intermediate');
+  const [regeneratingPlan, setRegeneratingPlan] = useState(false);
+  const [regenerateError, setRegenerateError] = useState<string | null>(null);
+  const [openRegenerateTopics, setOpenRegenerateTopics] = useState<
+    Record<string, boolean>
+  >({});
   const assistantDraftRef = useRef('');
   const questionStartedAtRef = useRef<number>(Date.now());
   const lessonStartRequestedRef = useRef<string | null>(null);
@@ -62,15 +73,28 @@ export default function LessonWorkspace({ learning }: Props) {
     learning.stage === 'lesson_in_progress' ||
     learning.stage === 'lesson_complete';
 
+  const lesson = workspace?.lesson ?? null;
+
   useEffect(() => {
     if (!shouldShowLesson) {
       return;
     }
 
     void loadWorkspace();
-  }, [learning.id, shouldShowLesson]);
+  }, [learning.id, shouldShowLesson, learning.stage, learning.plan_status]);
 
-  const lesson = workspace?.lesson ?? null;
+  useEffect(() => {
+    if (!shouldShowLesson || lesson || loading || startingLesson) {
+      return undefined;
+    }
+
+    const interval = window.setInterval(() => {
+      void loadWorkspace();
+    }, 3000);
+
+    return () => window.clearInterval(interval);
+  }, [shouldShowLesson, lesson, loading, startingLesson, learning.id]);
+
   const questions = workspace?.questions ?? [];
   const messages = workspace?.messages ?? [];
   const currentQuestion = useMemo(
@@ -99,6 +123,23 @@ export default function LessonWorkspace({ learning }: Props) {
   const isSummaryView =
     (learning.stage === 'lesson_complete' || lesson?.status === 'completed') &&
     !feedback?.correct;
+  const regeneratePlan = workspace?.plan ?? null;
+  const includedRegenerateTopicCount = useMemo(
+    () => (regeneratePlan?.topics ?? []).filter((topic) => topic.included).length,
+    [regeneratePlan],
+  );
+  const includedRegenerateSubtopicCount = useMemo(
+    () =>
+      (regeneratePlan?.topics ?? []).reduce(
+        (count, topic) =>
+          count + topic.subtopics.filter((subtopic) => subtopic.included).length,
+        0,
+      ),
+    [regeneratePlan],
+  );
+  const hasPendingDifficultyChange = regeneratePlan
+    ? selectedDifficulty !== (regeneratePlan.difficulty ?? 'Intermediate')
+    : false;
 
   useEffect(() => {
     if (
@@ -196,6 +237,9 @@ export default function LessonWorkspace({ learning }: Props) {
         regenerate,
       );
       setWorkspace(nextWorkspace);
+      setFeedback(null);
+      setSelectedChoiceIndex(null);
+      setActiveQuestionId(null);
       await dispatch(fetchLearningById(learning.id));
     } catch (nextError) {
       setError((nextError as Error).message);
@@ -203,6 +247,116 @@ export default function LessonWorkspace({ learning }: Props) {
     } finally {
       setLoading(false);
       setStartingLesson(false);
+    }
+  }
+
+  function openRegenerateSetup() {
+    const planDifficulty = workspace?.plan?.difficulty ?? 'Intermediate';
+    setSelectedDifficulty(planDifficulty);
+    setRegenerateError(null);
+    setOpenRegenerateTopics({});
+    setRegenerateSetupOpen(true);
+  }
+
+  function closeRegenerateSetup() {
+    setRegenerateSetupOpen(false);
+    setRegenerateError(null);
+    setRegeneratingPlan(false);
+  }
+
+  function toggleRegenerateTopic(topicId: string) {
+    setOpenRegenerateTopics((current) => ({
+      ...current,
+      [topicId]: !current[topicId],
+    }));
+  }
+
+  async function updateRegenerateTopic(topicId: string, included: boolean) {
+    const { plan: updatedPlan } = await api.learnings.updateTopicSelection(
+      learning.id,
+      topicId,
+      included,
+    );
+    setWorkspace((current) =>
+      current
+        ? {
+            ...current,
+            plan: updatedPlan,
+          }
+        : current,
+    );
+  }
+
+  async function updateRegenerateSubtopic(subtopicId: string, included: boolean) {
+    const { plan: updatedPlan } = await api.learnings.updateSubtopicSelection(
+      learning.id,
+      subtopicId,
+      included,
+    );
+    setWorkspace((current) =>
+      current
+        ? {
+            ...current,
+            plan: updatedPlan,
+          }
+        : current,
+    );
+  }
+
+  async function confirmRegenerateQuiz() {
+    const plan = workspace?.plan;
+    if (!plan) {
+      setRegenerateError('Study plan not found.');
+      return;
+    }
+
+    if (includedRegenerateSubtopicCount === 0) {
+      setRegenerateError('Select at least one subtopic to include in the quiz.');
+      return;
+    }
+
+    setRegenerateError(null);
+    setRegeneratingPlan(true);
+    try {
+      if (hasPendingDifficultyChange) {
+        const { plan: generatedPlan } = await api.learnings.regeneratePlan(
+          learning.id,
+          selectedDifficulty,
+        );
+        setWorkspace((current) =>
+          current
+            ? {
+                ...current,
+                plan: generatedPlan,
+              }
+            : current,
+        );
+        await dispatch(fetchLearningById(learning.id));
+        setRegenerateError(
+          'Study plan updated for the new difficulty. Review your topic selections, then click Generate quiz again.',
+        );
+        return;
+      }
+
+      if (learning.plan_status !== 'approved') {
+        const { plan: approvedPlan } = await api.learnings.approvePlan(learning.id);
+        setWorkspace((current) =>
+          current
+            ? {
+                ...current,
+                plan: approvedPlan,
+              }
+            : current,
+        );
+        await dispatch(fetchLearningById(learning.id));
+      }
+
+      closeRegenerateSetup();
+      await startLesson(true);
+    } catch (nextError) {
+      setRegenerateError((nextError as Error).message);
+    } finally {
+      setRegeneratingPlan(false);
     }
   }
 
@@ -261,6 +415,23 @@ export default function LessonWorkspace({ learning }: Props) {
     setError(null);
     assistantDraftRef.current = '';
 
+    setWorkspace((current) =>
+      current
+        ? {
+            ...current,
+            messages: [
+              ...current.messages,
+              {
+                id: `user-pending-${Date.now()}`,
+                role: 'user',
+                content: message,
+                created_at: new Date().toISOString(),
+              } as LearningChatMessage,
+            ],
+          }
+        : current,
+    );
+
     try {
       await api.learnings.streamLessonChat(learning.id, message, {
         onAck: ({ userMessage }) => {
@@ -269,7 +440,9 @@ export default function LessonWorkspace({ learning }: Props) {
               ? {
                   ...current,
                   messages: [
-                    ...current.messages,
+                    ...current.messages.filter(
+                      (item) => !String(item.id).startsWith('user-pending-'),
+                    ),
                     userMessage,
                     {
                       id: `lesson-assistant-draft-${Date.now()}`,
@@ -335,47 +508,6 @@ export default function LessonWorkspace({ learning }: Props) {
     void sendCoachMessage(coachDraft);
   }
 
-  function askForHint() {
-    if (!lesson || !currentQuestion) {
-      return;
-    }
-    setRequestingHint(true);
-    setError(null);
-    void api.learnings
-      .getLessonHint(learning.id, lesson.id, currentQuestion.id)
-      .then((result) => {
-        setFeedback((current) => ({
-          correct: false,
-          hint: result.hint,
-          explanation: current?.explanation ?? null,
-          explanationImageUrl: current?.explanationImageUrl ?? null,
-          selectedChoiceIndex: selectedChoiceIndex ?? -1,
-          completed: current?.completed ?? false,
-        }));
-        setWorkspace((current) =>
-          current
-            ? {
-                ...current,
-                questions: current.questions.map((question) =>
-                  question.id === currentQuestion.id
-                    ? {
-                        ...question,
-                        hint_requests: result.hintCount,
-                      }
-                    : question,
-                ),
-              }
-            : current,
-        );
-      })
-      .catch((nextError) => {
-        setError((nextError as Error).message);
-      })
-      .finally(() => {
-        setRequestingHint(false);
-      });
-  }
-
   function askToLearnMore() {
     window.scrollTo(0, 0);
     window.requestAnimationFrame(() => {
@@ -433,13 +565,6 @@ export default function LessonWorkspace({ learning }: Props) {
       ...summary.objective_coverage.map((item) => item.mastery_score),
       100,
     );
-    const maxAttempts = Math.max(
-      ...summary.attempt_multiplicity.map(
-        (item) => item.correct_attempt_count + item.wrong_attempt_count,
-      ),
-      1,
-    );
-
     return (
       <div className="lesson-summary-stack">
         <div className="lesson-summary-grid">
@@ -485,17 +610,28 @@ export default function LessonWorkspace({ learning }: Props) {
             <h4>Attempt Multiplicity</h4>
             <div className="lesson-stacked-list">
               {summary.attempt_multiplicity.map((metric) => {
+                const totalAttempts =
+                  metric.correct_attempt_count + metric.wrong_attempt_count;
+                const correctWidth =
+                  totalAttempts > 0
+                    ? (metric.correct_attempt_count / totalAttempts) * 100
+                    : 0;
+                const wrongWidth =
+                  totalAttempts > 0
+                    ? (metric.wrong_attempt_count / totalAttempts) * 100
+                    : 0;
+
                 return (
                   <div key={metric.objective_title} className="lesson-stacked-row">
                     <div className="lesson-stacked-label">{metric.objective_title}</div>
                     <div className="lesson-stacked-bar">
                       <div
                         className="lesson-stacked-fill lesson-stacked-first"
-                        style={{ width: `${(metric.correct_attempt_count / maxAttempts) * 100}%` }}
+                        style={{ width: `${correctWidth}%` }}
                       />
                       <div
                         className="lesson-stacked-fill lesson-stacked-assisted"
-                        style={{ width: `${(metric.wrong_attempt_count / maxAttempts) * 100}%` }}
+                        style={{ width: `${wrongWidth}%` }}
                       />
                     </div>
                     <div className="lesson-stacked-meta">
@@ -525,7 +661,7 @@ export default function LessonWorkspace({ learning }: Props) {
             <h4 className="lesson-chart-heading-with-info">
               <span>Friction Zones</span>
               {renderMetricInfo(
-                'Questions that triggered repeated hint usage, indicating the areas where you needed the most support.',
+                'Questions you answered incorrectly multiple times, indicating areas that need more review.',
                 'Friction Zones',
               )}
             </h4>
@@ -544,7 +680,7 @@ export default function LessonWorkspace({ learning }: Props) {
                         {zone.page_refs.length ? ` • Pages ${zone.page_refs.join(', ')}` : ''}
                       </div>
                     </div>
-                    <span>{zone.hint_requests} hints</span>
+                    <span>{zone.wrong_attempt_count} wrong</span>
                   </div>
                 ))}
               </div>
@@ -568,10 +704,6 @@ export default function LessonWorkspace({ learning }: Props) {
     objectiveCoverage: LessonObjectiveMetric[],
     maxObjectiveScore: number,
   ) {
-    const detailObjective =
-      objectiveCoverage.find(
-        (objective) => objective.objective_title === detailObjectiveTitle,
-      ) ?? objectiveCoverage[0] ?? null;
     const size = 260;
     const center = size / 2;
     const radius = 88;
@@ -687,7 +819,7 @@ export default function LessonWorkspace({ learning }: Props) {
               key={objective.objective_title}
               type="button"
               className={`lesson-radar-legend-item ${
-                detailObjective?.objective_title === objective.objective_title
+                detailObjectiveTitle === objective.objective_title
                   ? 'lesson-radar-legend-item-active'
                   : ''
               }`}
@@ -701,35 +833,6 @@ export default function LessonWorkspace({ learning }: Props) {
           ))}
         </div>
 
-        {detailObjective ? (
-          <div className="lesson-radar-detail">
-            <div className="lesson-radar-detail-title">
-              {detailObjective.objective_title}
-            </div>
-            <div className="lesson-radar-detail-grid">
-              <div className="lesson-radar-detail-item">
-                <span>Mastery</span>
-                <strong>{detailObjective.mastery_score}%</strong>
-              </div>
-              <div className="lesson-radar-detail-item">
-                <span>Correct attempts</span>
-                <strong>{detailObjective.correct_attempt_count}</strong>
-              </div>
-              <div className="lesson-radar-detail-item">
-                <span>Wrong attempts</span>
-                <strong>{detailObjective.wrong_attempt_count}</strong>
-              </div>
-              <div className="lesson-radar-detail-item">
-                <span>Avg. response time</span>
-                <strong>{formatDuration(detailObjective.avg_response_time_ms)}</strong>
-              </div>
-              <div className="lesson-radar-detail-item">
-                <span>Total weight</span>
-                <strong>{detailObjective.total_weightage}</strong>
-              </div>
-            </div>
-          </div>
-        ) : null}
       </div>
     );
   }
@@ -826,9 +929,159 @@ export default function LessonWorkspace({ learning }: Props) {
         )
       : null;
 
+  const regenerateSetupModal = regenerateSetupOpen && regeneratePlan ? (
+    <Modal
+      title="Regenerate quiz"
+      onClose={closeRegenerateSetup}
+      footer={
+        <>
+          <Button variant="ghost" onClick={closeRegenerateSetup}>
+            Cancel
+          </Button>
+          <Button
+            loading={regeneratingPlan || startingLesson}
+            disabled={regeneratingPlan || startingLesson}
+            onClick={() => void confirmRegenerateQuiz()}
+          >
+            <Sparkles size={16} />
+            {hasPendingDifficultyChange ? 'Update plan' : 'Generate quiz'}
+          </Button>
+        </>
+      }
+    >
+      <div className="lesson-regenerate-setup">
+        <p className="lesson-regenerate-intro">
+          Choose the difficulty and topics you want covered before generating a new
+          quiz.
+        </p>
+
+        <label className="study-plan-empty-field">
+          <span>Difficulty level</span>
+          <div className="select-shell study-plan-difficulty-shell">
+            <select
+              className="input study-plan-difficulty-select"
+              value={selectedDifficulty}
+              onChange={(event) =>
+                setSelectedDifficulty(event.target.value as StudyPlanDifficulty)
+              }
+              disabled={regeneratingPlan || startingLesson}
+            >
+              <option value="Easy">Easy</option>
+              <option value="Intermediate">Intermediate</option>
+              <option value="Hard">Hard</option>
+            </select>
+            <span className="select-shell-icon" aria-hidden="true">
+              <ChevronDown size={16} />
+            </span>
+          </div>
+        </label>
+
+        {hasPendingDifficultyChange ? (
+          <p className="study-plan-difficulty-helper">
+            Changing difficulty will regenerate the study plan first. Review the new
+            topics before generating the quiz.
+          </p>
+        ) : null}
+
+        <div className="study-plan-stats lesson-regenerate-stats">
+          <div className="study-plan-stat">
+            <span className="study-plan-stat-value">{includedRegenerateTopicCount}</span>
+            <span className="study-plan-stat-label">Topics selected</span>
+          </div>
+          <div className="study-plan-stat">
+            <span className="study-plan-stat-value">
+              {includedRegenerateSubtopicCount}
+            </span>
+            <span className="study-plan-stat-label">Subtopics selected</span>
+          </div>
+        </div>
+
+        <div className="lesson-regenerate-topics">
+          {regeneratePlan.topics.map((topic) => (
+            <div key={topic.id} className="study-plan-topic-card">
+              <div className="study-plan-topic-header">
+                <label className="study-plan-checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={topic.included}
+                    onChange={(event) =>
+                      void updateRegenerateTopic(topic.id, event.target.checked)
+                    }
+                    disabled={regeneratingPlan || startingLesson}
+                  />
+                  <div>
+                    <div className="study-plan-topic-title">{topic.title}</div>
+                    {topic.description ? (
+                      <div className="study-plan-topic-description">
+                        {topic.description}
+                      </div>
+                    ) : null}
+                  </div>
+                </label>
+                <button
+                  type="button"
+                  className="study-plan-toggle"
+                  onClick={() => toggleRegenerateTopic(topic.id)}
+                  aria-label={
+                    openRegenerateTopics[topic.id]
+                      ? `Collapse ${topic.title}`
+                      : `Expand ${topic.title}`
+                  }
+                >
+                  {openRegenerateTopics[topic.id] ? (
+                    <ChevronUp size={18} />
+                  ) : (
+                    <ChevronDown size={18} />
+                  )}
+                </button>
+              </div>
+              {openRegenerateTopics[topic.id] ? (
+                <div className="study-plan-subtopics">
+                  {topic.subtopics.map((subtopic) => (
+                    <label
+                      key={subtopic.id}
+                      className="study-plan-checkbox-row subtopic"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={subtopic.included}
+                        onChange={(event) =>
+                          void updateRegenerateSubtopic(
+                            subtopic.id,
+                            event.target.checked,
+                          )
+                        }
+                        disabled={regeneratingPlan || startingLesson}
+                      />
+                      <div>
+                        <div className="study-plan-subtopic-title">
+                          {subtopic.title}
+                        </div>
+                        {subtopic.description ? (
+                          <div className="study-plan-subtopic-description">
+                            {subtopic.description}
+                          </div>
+                        ) : null}
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ))}
+        </div>
+
+        {regenerateError ? (
+          <span className="study-chat-error">{regenerateError}</span>
+        ) : null}
+      </div>
+    </Modal>
+  ) : null;
+
   return (
     <>
       {coachDrawerPortal}
+      {regenerateSetupModal}
       <div className="detail-section">
         <div className="detail-section-title">
           <span><Sparkles size={20} /></span>{' '}
@@ -874,8 +1127,14 @@ export default function LessonWorkspace({ learning }: Props) {
                 <Button
                   variant="ghost"
                   loading={loading || startingLesson}
-                  disabled={loading || startingLesson || streaming || submitting}
-                  onClick={() => void startLesson(true)}
+                  disabled={
+                    loading ||
+                    startingLesson ||
+                    streaming ||
+                    submitting ||
+                    regenerateSetupOpen
+                  }
+                  onClick={openRegenerateSetup}
                 >
                   <RefreshCw size={16} /> Regenerate quiz
                 </Button>
@@ -888,8 +1147,8 @@ export default function LessonWorkspace({ learning }: Props) {
                 <div>
                   <h4>Your lesson summary is ready.</h4>
                   <p>
-                    Review your performance insights below or regenerate the quiz if
-                    you want another pass through the same study plan.
+                    Review your performance insights below or regenerate the quiz with
+                    updated topic and difficulty selections.
                   </p>
                 </div>
               </div>
@@ -955,14 +1214,6 @@ export default function LessonWorkspace({ learning }: Props) {
                     disabled={selectedChoiceIndex === null || submitting || feedback?.correct === true}
                   >
                     Submit answer
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    onClick={askForHint}
-                    loading={requestingHint}
-                    disabled={streaming || submitting || requestingHint || feedback?.correct === true}
-                  >
-                    <HelpCircle size={16} /> Hint
                   </Button>
                   <Button
                     variant="ghost"

@@ -1,10 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { AzureOpenAI } from 'openai';
 import { AzureChatOpenAI } from '@langchain/openai';
+import { z } from 'zod';
 
 @Injectable()
 export class AzureOpenAiService {
   private readonly client: AzureOpenAI;
+  private readonly chatClient: AzureOpenAI;
   private readonly embeddingDeployment: string;
   private readonly chatDeployment: string;
   private readonly endpoint: string;
@@ -35,6 +37,12 @@ export class AzureOpenAiService {
       apiVersion: this.apiVersion,
       deployment: this.embeddingDeployment,
     });
+    this.chatClient = new AzureOpenAI({
+      apiKey: this.apiKey,
+      endpoint: this.endpoint,
+      apiVersion: this.apiVersion,
+      deployment: this.chatDeployment,
+    });
   }
 
   async embedTexts(texts: string[]): Promise<number[][]> {
@@ -57,13 +65,55 @@ export class AzureOpenAiService {
   }
 
   createChatModel(options?: { temperature?: number }) {
-    return new AzureChatOpenAI({
+    const config: Record<string, unknown> = {
       azureOpenAIApiKey: this.apiKey,
       azureOpenAIEndpoint: this.endpoint,
       azureOpenAIApiDeploymentName: this.chatDeployment,
       azureOpenAIApiVersion: this.apiVersion,
-      temperature: options?.temperature ?? 0.2,
       maxRetries: 1,
+    };
+
+    const explicitTemperature = process.env.AZURE_OPENAI_CHAT_TEMPERATURE;
+    if (explicitTemperature !== undefined && explicitTemperature !== '') {
+      config.temperature = Number(explicitTemperature);
+    } else if (process.env.AZURE_OPENAI_CHAT_SUPPORTS_TEMPERATURE === 'true') {
+      config.temperature = options?.temperature ?? 0.2;
+    }
+
+    return new AzureChatOpenAI(config);
+  }
+
+  async invokeVisionJson<T>(params: {
+    imageUrl: string;
+    systemPrompt: string;
+    userText: string;
+    schema: z.ZodType<T>;
+    detail?: 'low' | 'high';
+  }): Promise<T> {
+    const response = await this.chatClient.chat.completions.create({
+      model: this.chatDeployment,
+      reasoning_effort: 'none',
+      max_completion_tokens: 250,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: params.systemPrompt },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: params.userText },
+            {
+              type: 'image_url',
+              image_url: {
+                url: params.imageUrl,
+                detail: params.detail ?? 'low',
+              },
+            },
+          ],
+        },
+      ],
     });
+
+    const content = response.choices[0]?.message?.content ?? '{}';
+    return params.schema.parse(JSON.parse(content));
   }
 }

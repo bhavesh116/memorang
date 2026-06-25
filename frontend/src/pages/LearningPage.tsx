@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useSelector, useDispatch } from 'react-redux';
 import { Search } from 'lucide-react';
 import { RootState, AppDispatch } from '@/store';
-import { fetchLearningById, selectLearning } from '@/store/learningsSlice';
+import { fetchLearningById, fetchLearningStatus, selectLearning } from '@/store/learningsSlice';
 import LearningDetail from '@/components/learnings/LearningDetail';
 import Spinner from '@/components/ui/Spinner';
 
@@ -18,6 +18,21 @@ export default function LearningPage() {
   // Sync selected ID in Redux when navigating directly via URL
   useEffect(() => {
     if (id) dispatch(selectLearning(id));
+  }, [id, dispatch]);
+
+  // Always refresh status while this learning is open.
+  useEffect(() => {
+    if (!id) {
+      return undefined;
+    }
+
+    void dispatch(fetchLearningStatus(id));
+
+    const interval = window.setInterval(() => {
+      void dispatch(fetchLearningStatus(id));
+    }, 3000);
+
+    return () => window.clearInterval(interval);
   }, [id, dispatch]);
 
   useEffect(() => {

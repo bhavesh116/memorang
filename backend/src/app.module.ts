@@ -6,6 +6,7 @@ import { AzureModule } from './azure/azure.module';
 import { AzureOpenAiModule } from './azure-openai/azure-openai.module';
 import { DocumentIntelligenceModule } from './document-intelligence/document-intelligence.module';
 import { HealthModule } from './health/health.module';
+import { ImageClassificationModule } from './image-classification/image-classification.module';
 import { IngestionModule } from './ingestion/ingestion.module';
 import { LangGraphModule } from './langgraph/langgraph.module';
 import { LessonModule } from './lesson/lesson.module';
@@ -26,6 +27,7 @@ import { TemporalModule } from './temporal/temporal.module';
     SupabaseModule,
     AzureModule,
     AzureOpenAiModule,
+    ImageClassificationModule,
     DocumentIntelligenceModule,
     LangGraphModule,
     TemporalModule,

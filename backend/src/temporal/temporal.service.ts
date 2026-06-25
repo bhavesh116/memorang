@@ -19,32 +19,48 @@ export class TemporalService implements OnModuleDestroy {
     return process.env.TEMPORAL_TASK_QUEUE || 'document-ingestion';
   }
 
-  async startDocumentIngestionWorkflow(
-    input: DocumentIngestionWorkflowInput,
-  ): Promise<string> {
-    const workflowId = `document-ingestion-${input.learningId}`;
+  async terminateDocumentIngestionWorkflow(learningId: string): Promise<void> {
+    const workflowId = `document-ingestion-${learningId}`;
 
     try {
       const client = new Client({
         connection: await this.getConnection(),
         namespace: this.namespace,
       });
-
-      await client.workflow.start('documentIngestionWorkflow', {
-        args: [input],
-        taskQueue: this.taskQueue,
-        workflowId,
-      });
+      const handle = client.workflow.getHandle(workflowId);
+      await handle.terminate('Ingestion restarted');
+      this.logger.log(`Terminated workflow ${workflowId}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (!message.includes('Workflow execution already started')) {
-        throw error;
+      if (
+        message.includes('not found') ||
+        message.includes('workflow not found') ||
+        message.includes('WorkflowNotFound')
+      ) {
+        return;
       }
 
       this.logger.warn(
-        `Workflow ${workflowId} already running, reusing existing execution`,
+        `Could not terminate workflow ${workflowId}: ${message}`,
       );
     }
+  }
+
+  async startDocumentIngestionWorkflow(
+    input: DocumentIngestionWorkflowInput,
+  ): Promise<string> {
+    const workflowId = `document-ingestion-${input.learningId}`;
+
+    const client = new Client({
+      connection: await this.getConnection(),
+      namespace: this.namespace,
+    });
+
+    await client.workflow.start('documentIngestionWorkflow', {
+      args: [input],
+      taskQueue: this.taskQueue,
+      workflowId,
+    });
 
     return workflowId;
   }

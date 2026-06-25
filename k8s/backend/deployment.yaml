@@ -24,6 +24,13 @@ spec:
       - name: memorang-backend-prod
         image: tickertom.azurecr.io/memorang-backend:latest
         imagePullPolicy: Always
+        command:
+        - doppler
+        - run
+        - --preserve-env=TEMPORAL_ADDRESS,TEMPORAL_NAMESPACE,TEMPORAL_TASK_QUEUE
+        - --
+        - node
+        - dist/main
         env:
         - name: DOPPLER_TOKEN
           valueFrom:
@@ -36,6 +43,12 @@ spec:
           value: /tmp
         - name: PORT
           value: "3001"
+        - name: TEMPORAL_ADDRESS
+          value: temporal:7233
+        - name: TEMPORAL_NAMESPACE
+          value: default
+        - name: TEMPORAL_TASK_QUEUE
+          value: document-ingestion
         ports:
         - containerPort: 3001
           name: mem-api-port

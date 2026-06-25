@@ -2,12 +2,21 @@ import { proxyActivities } from '@temporalio/workflow';
 import {
   DocumentAnalysisSummary,
   DocumentIngestionWorkflowInput,
+  DocumentIntelligenceSnapshot,
 } from '../types';
 
 const activities = proxyActivities<{
   initializeIngestion(input: DocumentIngestionWorkflowInput): Promise<void>;
-  analyzeDocument(
+  runDocumentIntelligence(
     input: DocumentIngestionWorkflowInput,
+  ): Promise<DocumentIntelligenceSnapshot>;
+  extractAndClassifyFigures(
+    input: DocumentIngestionWorkflowInput,
+    snapshot: DocumentIntelligenceSnapshot,
+  ): Promise<number>;
+  persistDocumentChunks(
+    input: DocumentIngestionWorkflowInput,
+    snapshot: DocumentIntelligenceSnapshot,
   ): Promise<DocumentAnalysisSummary>;
   embedDocumentChunks(input: DocumentIngestionWorkflowInput): Promise<number>;
   finalizeIngestion(
@@ -36,7 +45,13 @@ export async function documentIngestionWorkflow(
 
   try {
     await activities.initializeIngestion(input);
-    summary = await activities.analyzeDocument(input);
+    const snapshot = await activities.runDocumentIntelligence(input);
+    const imageCount = await activities.extractAndClassifyFigures(input, snapshot);
+    summary = await activities.persistDocumentChunks(input, snapshot);
+    summary = {
+      ...summary,
+      imageCount: Math.max(summary.imageCount, imageCount),
+    };
     const embeddedChunkCount = await activities.embedDocumentChunks(input);
     summary = {
       ...summary,

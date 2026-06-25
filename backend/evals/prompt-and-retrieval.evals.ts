@@ -327,11 +327,14 @@ test('lesson generation prompt includes objective coverage, approved objectives,
     azureMock as any,
     studyPlanServiceMock as any,
     {} as any,
+    {} as any,
   );
 
   (service as any).getLatestLesson = async () => null;
-  (service as any).buildLessonContext = async () =>
+  (service as any).buildTopicLessonContext = async () =>
     'Objective: Arrhythmias\nPage 4 — Section: ECG Findings — Irregularly irregular rhythm.\nImage candidates:\n- image-1: ECG strip (page 4)';
+  (service as any).buildImageReferenceMap = async () =>
+    '- Image image-1 (page 4): ECG strip — https://example.com/ecg.png';
   (service as any).persistLesson = async () => ({ id: 'lesson-1' });
   (service as any).getWorkspace = async () => ({ lesson: { id: 'lesson-1' } });
 
@@ -344,14 +347,17 @@ test('lesson generation prompt includes objective coverage, approved objectives,
   const humanText = messageText(captured.messages?.[1] as { content: unknown });
 
   assert.match(systemText, /mastery-oriented MCQ lesson/i);
-  assert.match(systemText, /Use image-based questions when an image candidate is provided/i);
+  assert.match(systemText, /Cover every listed subtopic with at least two distinct questions/i);
+  assert.match(systemText, /At least one third of questions MUST use questionType "image"/i);
   assert.match(systemText, /Hints must support reasoning without revealing the answer directly/i);
 
-  assert.match(humanText, /Target question count: 6/);
+  assert.match(humanText, /Topic: Arrhythmias/);
+  assert.match(humanText, /Target question count for this topic: 4/);
   assert.match(humanText, /Target difficulty: Intermediate/);
-  assert.match(humanText, /Approved study plan:/);
-  assert.match(humanText, /Arrhythmias/);
-  assert.match(humanText, /Generate the full quiz set now for the approved study plan/i);
+  assert.match(humanText, /Subtopics to cover deeply:/);
+  assert.match(humanText, /Atrial Fibrillation/);
+  assert.match(humanText, /Generate all questions for this topic now/);
+  assert.match(humanText, /Topic-specific document context and image candidates:/);
   assert.match(humanText, /Image candidates:/);
 });
 
@@ -373,6 +379,7 @@ test('lesson coach prompt reinforces hint-only behavior and current question gro
     {} as any,
     {} as any,
     studyPlanServiceMock as any,
+    {} as any,
     {} as any,
   );
 
@@ -400,7 +407,7 @@ test('lesson coach prompt reinforces hint-only behavior and current question gro
 });
 
 test('lesson retrieval context formats page and section labels and truncates long output', async () => {
-  const service = new LessonService({} as any, {} as any, {} as any, {} as any);
+  const service = new LessonService({} as any, {} as any, {} as any, {} as any, {} as any);
 
   (service as any).getRelevantChunkRows = async () => [
     {
@@ -483,6 +490,7 @@ test('document embedding pipeline batches chunks, formats vectors, and updates p
     supabaseMock as any,
     {} as any,
     azureMock as any,
+    {} as any,
     {} as any,
   );
 

@@ -7,6 +7,7 @@ import {
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { z } from 'zod';
 import { AzureOpenAiService } from '../azure-openai/azure-openai.service';
+import { ImageClassificationService } from '../image-classification/image-classification.service';
 import { LangGraphService } from '../langgraph/langgraph.service';
 import { StudyPlanService } from '../study-plan/study-plan.service';
 import { LearningChatMessage, LearningChatThread } from '../study-plan/types';
@@ -44,6 +45,18 @@ const lessonQuestionSchema = z.object({
 
 type GeneratedLesson = z.infer<typeof lessonQuestionSchema>;
 
+const QUESTIONS_PER_SUBTOPIC = 2;
+const MIN_QUESTIONS_PER_TOPIC = 4;
+
+interface TopicGenerationUnit {
+  topic: {
+    title: string;
+    subtopics: Array<{ title: string; included: boolean }>;
+  };
+  subtopicTitles: string[];
+  targetCount: number;
+}
+
 @Injectable()
 export class LessonService {
   constructor(
@@ -51,6 +64,7 @@ export class LessonService {
     private readonly azureOpenAiService: AzureOpenAiService,
     private readonly studyPlanService: StudyPlanService,
     private readonly langGraphService: LangGraphService,
+    private readonly imageClassificationService: ImageClassificationService,
   ) {}
 
   async getWorkspace(learningId: string, userId: string): Promise<LessonWorkspace> {
@@ -119,38 +133,26 @@ export class LessonService {
       await this.deleteLessonArtifacts(learningId, userId);
     }
 
-    const promptContext = await this.buildLessonContext(learningId, plan);
-    const targetCount = this.determineQuestionCount(plan);
-    const model = this.azureOpenAiService
-      .createChatModel({ temperature: 0.2 })
-      .withStructuredOutput(lessonQuestionSchema);
+    const imageReferenceMap = await this.buildImageReferenceMap(learningId, plan);
+    const topicUnits = this.buildTopicGenerationUnits(plan);
+    const generatedQuestions: GeneratedLesson['questions'] = [];
 
-    const generated = (await model.invoke([
-      new SystemMessage(
-        [
-          'You are generating a mastery-oriented MCQ lesson.',
-          'Cover the selected objectives well enough that the learner can understand the core topics.',
-          'Use image-based questions when an image candidate is provided and it is genuinely helpful.',
-          'Generate plausible distractors.',
-          'Assign a weightage from 1 to 10 for each question based on importance and diagnostic value.',
-          'Hints must support reasoning without revealing the answer directly.',
-          'Explanations should teach the concept and mention why the correct option is right.',
-        ].join(' '),
-      ),
-      new HumanMessage(
-        [
-          `Target question count: ${targetCount}`,
-          `Target difficulty: ${plan.difficulty ?? 'Intermediate'}`,
-          'Approved study plan:',
-          this.formatApprovedObjectives(plan),
-          '',
-          'Generate the full quiz set now for the approved study plan. Do not assume later questions will be generated dynamically.',
-          '',
-          'Available learning context and image candidates:',
-          promptContext,
-        ].join('\n'),
-      ),
-    ])) as GeneratedLesson;
+    for (const unit of topicUnits) {
+      const topicContext = await this.buildTopicLessonContext(learningId, unit.topic);
+      const batch = await this.generateQuestionsForTopic({
+        unit,
+        plan,
+        topicContext,
+        imageContext: imageReferenceMap,
+      });
+      generatedQuestions.push(...batch.questions);
+    }
+
+    const generated: GeneratedLesson = {
+      title: `${learning.title} Quiz`,
+      summary: `${generatedQuestions.length} questions across ${topicUnits.length} topics and ${this.countIncludedSubtopics(plan)} subtopics.`,
+      questions: generatedQuestions,
+    };
 
     const lesson = await this.persistLesson(learning, plan, generated);
 
@@ -249,37 +251,6 @@ export class LessonService {
     };
   }
 
-  async getQuestionHint(params: {
-    learningId: string;
-    userId: string;
-    lessonId: string;
-    questionId: string;
-  }) {
-    await this.getLessonById(params.lessonId, params.learningId, params.userId);
-    const question = await this.getQuestion(
-      params.questionId,
-      params.learningId,
-      params.userId,
-    );
-    const nextHintCount = (question.hint_requests ?? 0) + 1;
-
-    const { error } = await this.supabaseService.client
-      .from('learning_lesson_questions')
-      .update({ hint_requests: nextHintCount })
-      .eq('id', question.id)
-      .eq('learning_id', params.learningId)
-      .eq('user_id', params.userId);
-
-    if (error) {
-      throw new InternalServerErrorException(error.message);
-    }
-
-    return {
-      hint: question.hint_text,
-      hintCount: nextHintCount,
-    };
-  }
-
   async streamLessonCoach(params: {
     learningId: string;
     userId: string;
@@ -369,82 +340,155 @@ export class LessonService {
     ].join('\n');
   }
 
-  private async buildLessonContext(learningId: string, plan: any): Promise<string> {
-    const sections: string[] = [];
-    const imageMap = new Map<string, string>();
+  private async buildImageReferenceMap(learningId: string, plan: any): Promise<string> {
+    const imageCandidates = await this.getAllImageCandidatesForLearning(learningId);
 
-    for (const topic of plan.topics ?? []) {
-      if (!topic.included) continue;
-      const objectiveQuery = [topic.title, ...(topic.subtopics ?? []).filter((sub: any) => sub.included).map((sub: any) => sub.title)].join(', ');
-      const relevantChunks = await this.getRelevantChunkRows(learningId, objectiveQuery, 5);
-      const imageIds = new Set<string>();
-      const chunkLines = relevantChunks
-        .map((chunk) => {
-          const ids = Array.isArray(chunk.image_ids) ? chunk.image_ids : [];
-          ids.forEach((id) => imageIds.add(String(id)));
-          return [
-            `Page ${chunk.page_number ?? '?'}`,
-            chunk.section_title ? `Section: ${chunk.section_title}` : null,
-            chunk.chunk_text,
-          ]
-            .filter(Boolean)
-            .join(' — ');
-        })
-        .join('\n');
-
-      const imageCandidates = await this.getImageCandidates(
-        learningId,
-        Array.from(imageIds),
-      );
-      imageCandidates.forEach((image) => {
-        imageMap.set(
-          image.id,
-          `Image ${image.id} (page ${image.page_number ?? '?'}): ${image.caption ?? 'No caption'} — ${image.image_url}`,
-        );
-      });
-
-      sections.push(
-        [
-          `Objective: ${topic.title}`,
-          chunkLines,
-          imageCandidates.length
-            ? `Image candidates:\n${imageCandidates
-                .map(
-                  (image) =>
-                    `- ${image.id}: ${image.caption ?? 'No caption'} (page ${image.page_number ?? '?'})`,
-                )
-                .join('\n')}`
-            : 'Image candidates: none',
-        ].join('\n'),
-      );
+    if (imageCandidates.length === 0) {
+      return 'No instructional images available.';
     }
 
-    if (imageMap.size > 0) {
-      sections.push(
-        `Image reference map:\n${Array.from(imageMap.values())
-          .slice(0, 20)
-          .map((line) => `- ${line}`)
-          .join('\n')}`,
-      );
-    }
-
-    return sections.join('\n\n').slice(0, 26000);
+    return imageCandidates
+      .slice(0, 40)
+      .map(
+        (image) =>
+          `- Image ${image.id} (page ${image.page_number ?? '?'}): ${this.getImageDescription(image)} — ${image.image_url}`,
+      )
+      .join('\n');
   }
 
-  private determineQuestionCount(plan: any): number {
-    const includedTopics = (plan.topics ?? []).filter((topic: any) => topic.included);
-    const includedSubtopics = includedTopics.flatMap((topic: any) =>
-      (topic.subtopics ?? []).filter((subtopic: any) => subtopic.included),
+  private buildTopicGenerationUnits(plan: any): TopicGenerationUnit[] {
+    return (plan.topics ?? [])
+      .filter((topic: any) => topic.included)
+      .map((topic: any) => {
+        const subtopicTitles = (topic.subtopics ?? [])
+          .filter((subtopic: any) => subtopic.included)
+          .map((subtopic: any) => subtopic.title);
+
+        return {
+          topic,
+          subtopicTitles,
+          targetCount: this.determineQuestionCountForTopic(subtopicTitles.length),
+        };
+      });
+  }
+
+  private countIncludedSubtopics(plan: any): number {
+    return (plan.topics ?? [])
+      .filter((topic: any) => topic.included)
+      .flatMap((topic: any) =>
+        (topic.subtopics ?? []).filter((subtopic: any) => subtopic.included),
+      ).length;
+  }
+
+  private determineQuestionCountForTopic(subtopicCount: number): number {
+    if (subtopicCount <= 0) {
+      return MIN_QUESTIONS_PER_TOPIC;
+    }
+
+    return Math.max(MIN_QUESTIONS_PER_TOPIC, subtopicCount * QUESTIONS_PER_SUBTOPIC);
+  }
+
+  private async generateQuestionsForTopic(params: {
+    unit: TopicGenerationUnit;
+    plan: any;
+    topicContext: string;
+    imageContext: string;
+  }): Promise<GeneratedLesson> {
+    const { unit, plan, topicContext, imageContext } = params;
+    const model = this.azureOpenAiService
+      .createChatModel({ temperature: 0.2 })
+      .withStructuredOutput(lessonQuestionSchema);
+
+    const subtopicList =
+      unit.subtopicTitles.length > 0
+        ? unit.subtopicTitles.map((title) => `- ${title}`).join('\n')
+        : '- General topic coverage';
+    const hasImageCandidates = !imageContext.includes('No instructional images available');
+
+    return (await model.invoke([
+      new SystemMessage(
+        [
+          'You are generating a mastery-oriented MCQ lesson for one topic in a larger quiz.',
+          'Generate the exact target number of questions requested.',
+          'Cover every listed subtopic with at least two distinct questions when possible.',
+          'Test depth: application, discrimination, mechanisms, and common misconceptions—not just definitions.',
+          hasImageCandidates
+            ? 'Instructional images are available. At least one third of questions MUST use questionType "image" with a valid questionImageId from the candidates list.'
+            : 'No instructional images are available; use questionType "text" for all questions.',
+          'For image questions, show the figure to the learner and ask them to identify findings, anatomy, pathology, fracture patterns, radiology abnormalities, or what the visual depicts.',
+          'Image question prompts should work standalone with the displayed image (e.g. "What fracture pattern is shown in this radiograph?" or "Identify the abnormality in this image.").',
+          'Set questionImageId to the exact image id from the candidates list whenever questionType is "image".',
+          'If no suitable instructional image exists for a specific question, keep questionType as text and leave image IDs empty.',
+          'Generate plausible distractors.',
+          'Assign a weightage from 1 to 10 for each question based on importance and diagnostic value.',
+          'Hints must support reasoning without revealing the answer directly.',
+          'Explanations should teach the concept and mention why the correct option is right.',
+        ].join(' '),
+      ),
+      new HumanMessage(
+        [
+          `Topic: ${unit.topic.title}`,
+          `Target question count for this topic: ${unit.targetCount}`,
+          `Target difficulty: ${plan.difficulty ?? 'Intermediate'}`,
+          'Subtopics to cover deeply:',
+          subtopicList,
+          '',
+          'Generate all questions for this topic now. Do not assume later batches will cover missing subtopics.',
+          '',
+          'Topic-specific document context and image candidates:',
+          topicContext,
+          '',
+          'Global image reference map:',
+          imageContext,
+        ].join('\n'),
+      ),
+    ])) as GeneratedLesson;
+  }
+
+  private async buildTopicLessonContext(learningId: string, topic: any): Promise<string> {
+    const objectiveQuery = [
+      topic.title,
+      ...(topic.subtopics ?? [])
+        .filter((sub: any) => sub.included)
+        .map((sub: any) => sub.title),
+    ].join(', ');
+    const relevantChunks = await this.getRelevantChunkRows(learningId, objectiveQuery, 8);
+    const chunkLines = relevantChunks
+      .map((chunk) =>
+        [
+          `Page ${chunk.page_number ?? '?'}`,
+          chunk.section_title ? `Section: ${chunk.section_title}` : null,
+          chunk.chunk_text,
+        ]
+          .filter(Boolean)
+          .join(' — '),
+      )
+      .join('\n');
+
+    const pageNumbers = [
+      ...new Set(
+        relevantChunks
+          .map((chunk) => chunk.page_number)
+          .filter((pageNumber): pageNumber is number => typeof pageNumber === 'number'),
+      ),
+    ];
+    const imageCandidates = await this.getInstructionalImagesForLearning(
+      learningId,
+      pageNumbers,
     );
 
-    const desired = Math.max(
-      6,
-      includedSubtopics.length > 0
-        ? Math.min(includedSubtopics.length, 12)
-        : includedTopics.length * 2,
-    );
-
-    return Math.min(Math.max(desired, 6), 12);
+    return [
+      `Objective: ${topic.title}`,
+      chunkLines,
+      imageCandidates.length
+        ? `Image candidates (use these ids for questionImageId):\n${imageCandidates
+            .map(
+              (image) =>
+                `- ${image.id}: ${this.getImageDescription(image)} (page ${image.page_number ?? '?'})`,
+            )
+            .join('\n')}`
+        : 'Image candidates: none',
+    ].join('\n');
   }
 
   private formatApprovedObjectives(plan: any): string {
@@ -497,41 +541,78 @@ export class LessonService {
     const imageCandidates = await this.getAllImageCandidatesForLearning(learning.id);
     const imageMap = new Map(imageCandidates.map((image) => [image.id, image]));
 
-    const questionRows = generated.questions.map((question, index) => {
+    const questionRows = [];
+    for (const [index, question] of generated.questions.entries()) {
       const shuffledQuestion = this.shuffleQuestionChoices(question);
-      const questionImage = question.questionImageId
+      let questionImage = question.questionImageId
         ? imageMap.get(question.questionImageId) ?? null
         : null;
-      const explanationImage = question.explanationImageId
+      let explanationImage = question.explanationImageId
         ? imageMap.get(question.explanationImageId) ?? null
         : null;
+      let prompt = shuffledQuestion.prompt;
+      let questionType = shuffledQuestion.questionType;
 
-      return {
+      if (questionImage) {
+        const relevance = await this.imageClassificationService.validateQuestionImageRelevance(
+          {
+            imageUrl: questionImage.image_url,
+            prompt,
+            caption: questionImage.caption,
+            visionDescription: this.getVisionDescription(questionImage),
+          },
+        );
+
+        if (
+          !relevance.isRelevant &&
+          !this.imageClassificationService.isImageIdentificationPrompt(prompt)
+        ) {
+          questionImage = null;
+          questionType = 'text';
+          prompt = this.imageClassificationService.stripFigureReferences(prompt);
+        }
+      } else if (
+        questionType === 'image' ||
+        this.imageClassificationService.isImageIdentificationPrompt(prompt)
+      ) {
+        const fallbackImage = this.pickFallbackQuestionImage(
+          imageCandidates,
+          shuffledQuestion.questionImageId,
+        );
+        if (fallbackImage) {
+          questionImage = fallbackImage;
+          questionType = 'image';
+        } else {
+          questionType = 'text';
+          prompt = this.imageClassificationService.stripFigureReferences(prompt);
+        }
+      }
+
+      questionRows.push({
         learning_lesson_id: lesson.id,
         learning_id: learning.id,
         user_id: learning.user_id,
-        objective_title: question.objectiveTitle,
-        question_type: question.questionType,
-        prompt: question.prompt,
+        objective_title: shuffledQuestion.objectiveTitle,
+        question_type: questionType,
+        prompt,
         question_image_id: questionImage?.id ?? null,
         question_image_url: questionImage?.image_url ?? null,
         choices: shuffledQuestion.choices,
         correct_choice_index: shuffledQuestion.correctChoiceIndex,
-        weightage: question.weightage,
-        hint_text: question.hintText,
-        explanation_text: question.explanationText,
+        weightage: shuffledQuestion.weightage,
+        hint_text: shuffledQuestion.hintText,
+        explanation_text: shuffledQuestion.explanationText,
         explanation_image_id: explanationImage?.id ?? null,
         explanation_image_url: explanationImage?.image_url ?? null,
         order_index: index,
-        hint_requests: 0,
         metadata: {
           pages: [
             ...(questionImage?.page_number ? [questionImage.page_number] : []),
             ...(explanationImage?.page_number ? [explanationImage.page_number] : []),
           ],
         },
-      };
-    });
+      });
+    }
 
     if (questionRows.length > 0) {
       const { error } = await this.supabaseService.client
@@ -726,6 +807,38 @@ export class LessonService {
     }>;
   }
 
+  private async getInstructionalImagesForLearning(
+    learningId: string,
+    pageNumbers: number[] = [],
+  ): Promise<Array<any>> {
+    const allImages = await this.getAllImageCandidatesForLearning(learningId);
+
+    if (pageNumbers.length === 0) {
+      return allImages;
+    }
+
+    const pageSet = new Set(pageNumbers);
+    const pageMatched = allImages.filter((image) =>
+      typeof image.page_number === 'number' && pageSet.has(image.page_number),
+    );
+
+    return pageMatched.length > 0 ? pageMatched : allImages;
+  }
+
+  private pickFallbackQuestionImage(
+    imageCandidates: Array<any>,
+    preferredImageId?: string | null,
+  ): any | null {
+    if (preferredImageId) {
+      const preferred = imageCandidates.find((image) => image.id === preferredImageId);
+      if (preferred) {
+        return preferred;
+      }
+    }
+
+    return imageCandidates[0] ?? null;
+  }
+
   private async getImageCandidates(
     learningId: string,
     imageIds: string[],
@@ -736,7 +849,7 @@ export class LessonService {
 
     const { data, error } = await this.supabaseService.client
       .from('learning_document_images')
-      .select('id, page_number, caption, image_url')
+      .select('id, page_number, caption, image_url, metadata')
       .eq('learning_id', learningId)
       .in('id', imageIds);
 
@@ -744,7 +857,11 @@ export class LessonService {
       throw new InternalServerErrorException(error.message);
     }
 
-    return data ?? [];
+    return (data ?? []).filter((image) =>
+      this.imageClassificationService.isInstructionalMetadata(
+        image.metadata as Record<string, unknown>,
+      ),
+    );
   }
 
   private async getAllImageCandidatesForLearning(
@@ -752,14 +869,38 @@ export class LessonService {
   ): Promise<Array<any>> {
     const { data, error } = await this.supabaseService.client
       .from('learning_document_images')
-      .select('id, page_number, caption, image_url')
+      .select('id, page_number, caption, image_url, metadata')
       .eq('learning_id', learningId);
 
     if (error) {
       throw new InternalServerErrorException(error.message);
     }
 
-    return data ?? [];
+    return (data ?? []).filter((image) =>
+      this.imageClassificationService.isInstructionalMetadata(
+        image.metadata as Record<string, unknown>,
+      ),
+    );
+  }
+
+  private getVisionDescription(image: {
+    metadata?: Record<string, unknown> | null;
+  }): string | null {
+    const description = image.metadata?.vision_description;
+    return typeof description === 'string' && description.trim()
+      ? description.trim()
+      : null;
+  }
+
+  private getImageDescription(image: {
+    caption?: string | null;
+    metadata?: Record<string, unknown> | null;
+  }): string {
+    return (
+      this.getVisionDescription(image) ??
+      image.caption?.trim() ??
+      'No description available'
+    );
   }
 
   private async buildLessonSummary(
@@ -818,9 +959,8 @@ export class LessonService {
         const wrongAttemptCount = attempts.filter((attempt) => !attempt.isCorrect).length;
         const wasEventuallyCorrect = attempts.some((attempt) => attempt.isCorrect);
         const attemptPenalty = wrongAttemptCount * 35;
-        const hintPenalty = (question.hint_requests ?? 0) * 10;
         const baseScore = wasEventuallyCorrect ? 100 : 0;
-        const score = Math.max(0, baseScore - attemptPenalty - hintPenalty);
+        const score = Math.max(0, baseScore - attemptPenalty);
         return sum + score * (question.weightage ?? 1);
       }, 0);
 
@@ -851,19 +991,23 @@ export class LessonService {
       const wrongAttemptCount = attempts.filter((attempt) => !attempt.isCorrect).length;
       const wasEventuallyCorrect = attempts.some((attempt) => attempt.isCorrect);
       const attemptPenalty = wrongAttemptCount * 35;
-      const hintPenalty = (question.hint_requests ?? 0) * 10;
       const baseScore = wasEventuallyCorrect ? 100 : 0;
-      const score = Math.max(0, baseScore - attemptPenalty - hintPenalty);
+      const score = Math.max(0, baseScore - attemptPenalty);
       return sum + score * (question.weightage ?? 1);
     }, 0);
 
     const frictionZones: LessonFrictionZone[] = questions
-      .filter((question) => (question.hint_requests ?? 0) >= 3)
-      .map((question) => ({
+      .map((question) => {
+        const attempts = attemptsByQuestion.get(question.id) ?? [];
+        const wrongAttemptCount = attempts.filter((attempt) => !attempt.isCorrect).length;
+        return { question, wrongAttemptCount };
+      })
+      .filter(({ wrongAttemptCount }) => wrongAttemptCount >= 3)
+      .map(({ question, wrongAttemptCount }) => ({
         question_id: question.id,
         objective_title: question.objective_title,
         order_index: question.order_index,
-        hint_requests: question.hint_requests,
+        wrong_attempt_count: wrongAttemptCount,
         page_refs: this.extractPageRefs(question.metadata),
       }));
 
@@ -992,7 +1136,7 @@ export class LessonService {
         `Questions tied to ${frictionZones
           .map((zone) => zone.objective_title)
           .slice(0, 3)
-          .join(', ')} triggered repeated hints, so revisit those diagrams and explanations carefully.`,
+          .join(', ')} took multiple wrong attempts, so revisit those topics carefully.`,
       );
     }
 

@@ -10,3 +10,10 @@ export interface DocumentAnalysisSummary {
   imageCount: number;
   chunkCount: number;
 }
+
+export interface DocumentIntelligenceSnapshot {
+  operationLocation: string;
+  analysisBlobName: string;
+  pageCount: number;
+  figureCount: number;
+}

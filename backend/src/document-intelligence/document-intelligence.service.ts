@@ -25,6 +25,12 @@ export interface DocumentAnalysisResult {
   figures?: DocumentFigure[];
 }
 
+export interface DocumentAnalysisProgress {
+  attempt: number;
+  maxAttempts: number;
+  elapsedMs: number;
+}
+
 @Injectable()
 export class DocumentIntelligenceService {
   private readonly logger = new Logger(DocumentIntelligenceService.name);
@@ -48,7 +54,10 @@ export class DocumentIntelligenceService {
     }
   }
 
-  async analyzePdfFromUrl(pdfUrl: string): Promise<{
+  async analyzePdfFromUrl(
+    pdfUrl: string,
+    onProgress?: (progress: DocumentAnalysisProgress) => void | Promise<void>,
+  ): Promise<{
     operationLocation: string;
     result: DocumentAnalysisResult;
   }> {
@@ -82,7 +91,7 @@ export class DocumentIntelligenceService {
     }
 
     this.logger.log(`Started layout analysis with figure output for ${pdfUrl}`);
-    const result = await this.pollForResult(operationLocation);
+    const result = await this.pollForResult(operationLocation, onProgress);
     this.logger.log(
       `Layout analysis completed with ${result.pages?.length ?? 0} pages and ${result.figures?.length ?? 0} figures`,
     );
@@ -115,10 +124,21 @@ export class DocumentIntelligenceService {
 
   private async pollForResult(
     operationLocation: string,
+    onProgress?: (progress: DocumentAnalysisProgress) => void | Promise<void>,
   ): Promise<DocumentAnalysisResult> {
-    const maxAttempts = 120;
+    const pollIntervalMs = 5000;
+    const maxAttempts = 360;
+    const startedAt = Date.now();
 
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      if (onProgress) {
+        await onProgress({
+          attempt,
+          maxAttempts,
+          elapsedMs: Date.now() - startedAt,
+        });
+      }
+
       const response = await fetch(operationLocation, {
         headers: {
           'Ocp-Apim-Subscription-Key': this.apiKey,
@@ -143,7 +163,7 @@ export class DocumentIntelligenceService {
         throw new Error('Document Intelligence analysis failed');
       }
 
-      await new Promise((resolve) => setTimeout(resolve, 5000));
+      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
     }
 
     throw new Error('Document Intelligence analysis timed out');

@@ -21,6 +21,8 @@ export class IngestionService {
       );
     }
 
+    await this.temporalService.terminateDocumentIngestionWorkflow(learning.id);
+
     const workflowId = await this.temporalService.startDocumentIngestionWorkflow({
       learningId: learning.id,
       userId: learning.user_id,
@@ -75,7 +77,6 @@ export class IngestionService {
       .update({
         ingestion_status: 'uploaded',
         ingestion_progress_pct: 0,
-        ingestion_eta_seconds: null,
         ingestion_error: null,
         ingestion_started_at: null,
         ingestion_completed_at: null,

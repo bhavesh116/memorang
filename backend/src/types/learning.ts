@@ -59,7 +59,6 @@ export interface Learning {
   pdf_blob_name?: string | null;
   ingestion_status: IngestionStatus;
   ingestion_progress_pct?: number | null;
-  ingestion_eta_seconds?: number | null;
   ingestion_error?: string | null;
   ingestion_started_at?: string | null;
   ingestion_completed_at?: string | null;

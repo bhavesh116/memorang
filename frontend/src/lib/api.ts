@@ -245,12 +245,6 @@ export const api = {
         body: JSON.stringify({ selectedChoiceIndex, responseTimeMs }),
       }),
 
-    getLessonHint: (id: string, lessonId: string, questionId: string) =>
-      request<{ hint: string; hintCount: number }>(
-        `/learnings/${id}/lesson/${lessonId}/questions/${questionId}/hint`,
-        { method: 'POST' },
-      ),
-
     streamLessonChat: async (
       id: string,
       message: string,

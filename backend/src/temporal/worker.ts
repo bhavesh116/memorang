@@ -21,7 +21,9 @@ async function bootstrapWorker() {
     workflowsPath: require.resolve('./workflows/document-ingestion.workflow'),
     activities: {
       initializeIngestion: activities.initializeIngestion.bind(activities),
-      analyzeDocument: activities.analyzeDocument.bind(activities),
+      runDocumentIntelligence: activities.runDocumentIntelligence.bind(activities),
+      extractAndClassifyFigures: activities.extractAndClassifyFigures.bind(activities),
+      persistDocumentChunks: activities.persistDocumentChunks.bind(activities),
       embedDocumentChunks: activities.embedDocumentChunks.bind(activities),
       finalizeIngestion: activities.finalizeIngestion.bind(activities),
       failIngestion: activities.failIngestion.bind(activities),

@@ -143,6 +143,62 @@ export class AzureService implements OnModuleInit {
     }
   }
 
+  async uploadIngestionCache(
+    userId: string,
+    learningId: string,
+    payload: unknown,
+  ): Promise<string> {
+    const blobName = `ingestion-cache/${userId}/${learningId}/di-result.json`;
+    const buffer = Buffer.from(JSON.stringify(payload), 'utf8');
+
+    try {
+      const blockBlobClient =
+        this.pdfContainerClient.getBlockBlobClient(blobName);
+      await blockBlobClient.uploadData(buffer, {
+        blobHTTPHeaders: {
+          blobContentType: 'application/json',
+        },
+      });
+    } catch (err) {
+      this.logger.error('Azure ingestion cache upload failed', err);
+      throw new InternalServerErrorException(
+        'Failed to cache document analysis result',
+      );
+    }
+
+    return blobName;
+  }
+
+  async downloadIngestionCache<T>(blobName: string): Promise<T> {
+    try {
+      const blockBlobClient =
+        this.pdfContainerClient.getBlockBlobClient(blobName);
+      const response = await blockBlobClient.download();
+      const chunks: Buffer[] = [];
+
+      for await (const chunk of response.readableStreamBody ?? []) {
+        chunks.push(Buffer.from(chunk));
+      }
+
+      return JSON.parse(Buffer.concat(chunks).toString('utf8')) as T;
+    } catch (err) {
+      this.logger.error(`Azure ingestion cache download failed for ${blobName}`, err);
+      throw new InternalServerErrorException(
+        'Failed to load cached document analysis result',
+      );
+    }
+  }
+
+  async deleteIngestionCache(blobName: string): Promise<void> {
+    try {
+      const blockBlobClient =
+        this.pdfContainerClient.getBlockBlobClient(blobName);
+      await blockBlobClient.deleteIfExists();
+    } catch (err) {
+      this.logger.warn(`Failed to delete ingestion cache blob ${blobName}`, err);
+    }
+  }
+
   // ── Helpers ─────────────────────────────────────────────────────────────────
 
   private parseConnectionString(connStr: string): {

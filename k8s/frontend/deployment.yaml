@@ -24,12 +24,28 @@ spec:
       - name: memorang-frontend-prod
         image: tickertom.azurecr.io/memorang-frontend:latest
         imagePullPolicy: Always
+        command:
+        - doppler
+        - run
+        - --preserve-env=VITE_BACKEND_URL
+        - --
+        - /usr/local/bin/start-nginx-with-doppler.sh
         env:
         - name: DOPPLER_TOKEN
           valueFrom:
             secretKeyRef:
               name: doppler-tokens
               key: FRONTEND_DOPPLER_TOKEN
+        - name: VITE_BACKEND_URL
+          value: /api
+        volumeMounts:
+        - name: nginx-config
+          mountPath: /etc/nginx/conf.d/default.conf
+          subPath: default.conf
         ports:
         - containerPort: 80
           name: mem-fe-pod-port
+      volumes:
+      - name: nginx-config
+        configMap:
+          name: memorang-frontend-nginx

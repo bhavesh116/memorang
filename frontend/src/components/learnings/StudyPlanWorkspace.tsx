@@ -54,7 +54,7 @@ export default function StudyPlanWorkspace({ learning }: Props) {
     }
 
     void loadWorkspace();
-  }, [learning.id, shouldLoadWorkspace]);
+  }, [learning.id, shouldLoadWorkspace, learning.plan_status, learning.stage]);
 
   const plan = workspace?.plan ?? null;
   const messages = workspace?.messages ?? [];
@@ -217,6 +217,12 @@ export default function StudyPlanWorkspace({ learning }: Props) {
             messages: [
               ...current.messages,
               {
+                id: `user-pending-${Date.now()}`,
+                role: 'user',
+                content: message,
+                created_at: new Date().toISOString(),
+              } as LearningChatMessage,
+              {
                 id: `assistant-draft-${Date.now()}`,
                 role: 'assistant',
                 content: '',
@@ -236,7 +242,9 @@ export default function StudyPlanWorkspace({ learning }: Props) {
                   ...current,
                   messages: [
                     ...current.messages.filter(
-                      (item) => !String(item.id).startsWith('assistant-draft-'),
+                      (item) =>
+                        !String(item.id).startsWith('assistant-draft-') &&
+                        !String(item.id).startsWith('user-pending-'),
                     ),
                     userMessage,
                     {

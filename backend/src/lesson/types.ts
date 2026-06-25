@@ -58,7 +58,7 @@ export interface LessonFrictionZone {
   question_id: string;
   objective_title: string;
   order_index: number;
-  hint_requests: number;
+  wrong_attempt_count: number;
   page_refs: Array<number | string>;
 }
 

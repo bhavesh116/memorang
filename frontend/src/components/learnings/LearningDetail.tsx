@@ -1,9 +1,10 @@
-import { useEffect } from 'react';
-import { useDispatch } from 'react-redux';
+import { useEffect, useRef } from 'react';
+import { useDispatch, useSelector } from 'react-redux';
 import Badge from '@/components/ui/Badge';
 import Button from '@/components/ui/Button';
-import { AppDispatch } from '@/store';
-import { fetchLearningStatus, restartIngestion } from '@/store/learningsSlice';
+import { AppDispatch, RootState } from '@/store';
+import { restartIngestion } from '@/store/learningsSlice';
+import { useIngestionTiming } from '@/hooks/useIngestionTiming';
 import {
   FileText,
   BarChart,
@@ -27,6 +28,10 @@ interface Props {
 
 export default function LearningDetail({ learning }: Props) {
   const dispatch = useDispatch<AppDispatch>();
+  const reprocessing = useSelector(
+    (state: RootState) => state.learnings.reprocessing,
+  );
+  const autoRetriedRef = useRef<string | null>(null);
   const createdDate = new Date(learning.created_at).toLocaleDateString('en-US', {
     year: 'numeric', month: 'long', day: 'numeric',
   });
@@ -35,25 +40,40 @@ export default function LearningDetail({ learning }: Props) {
     learning.ingestion_status === 'queued' ||
     learning.ingestion_status === 'analyzing' ||
     learning.ingestion_status === 'embedding';
+  const isStuckUploaded =
+    learning.ingestion_status === 'uploaded' && !learning.ingestion_started_at;
+  const showRetryAnalysis =
+    learning.ingestion_status === 'failed' || isStuckUploaded;
 
   useEffect(() => {
-    if (!activeIngestion) {
+    if (!isStuckUploaded) {
       return;
     }
 
-    dispatch(fetchLearningStatus(learning.id));
+    if (autoRetriedRef.current === learning.id) {
+      return;
+    }
 
-    const interval = window.setInterval(() => {
-      dispatch(fetchLearningStatus(learning.id));
-    }, 5000);
+    const uploadedAt = new Date(learning.updated_at).getTime();
+    const elapsed = Date.now() - uploadedAt;
+    const delay = Math.max(0, 120_000 - elapsed);
 
-    return () => window.clearInterval(interval);
-  }, [activeIngestion, dispatch, learning.id]);
+    const timer = window.setTimeout(() => {
+      autoRetriedRef.current = learning.id;
+      dispatch(restartIngestion(learning.id));
+    }, delay);
+
+    return () => window.clearTimeout(timer);
+  }, [dispatch, isStuckUploaded, learning.id, learning.updated_at]);
 
   const progress = Math.max(
     0,
     Math.min(100, Math.round(learning.ingestion_progress_pct ?? 0)),
   );
+  const ingestionTiming = useIngestionTiming({
+    active: activeIngestion,
+    startedAt: learning.ingestion_started_at,
+  });
   const isStudyPlanStage = learning.stage === 'study_uploaded';
   const isQuizStage =
     learning.stage === 'user_approved_study' ||
@@ -175,6 +195,30 @@ export default function LearningDetail({ learning }: Props) {
                       : ''}
                   </span>
                 </div>
+                {activeIngestion && ingestionTiming.startedAtLabel && (
+                  <div
+                    style={{
+                      display: 'grid',
+                      gap: '0.35rem',
+                      marginTop: '0.75rem',
+                      fontSize: '0.8rem',
+                      color: 'var(--text-muted)',
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem' }}>
+                      <span>Started</span>
+                      <span style={{ color: 'var(--text-secondary)' }}>
+                        {ingestionTiming.startedAtLabel}
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem' }}>
+                      <span>Elapsed</span>
+                      <span style={{ color: 'var(--text-secondary)' }}>
+                        {ingestionTiming.elapsedLabel ?? '—'}
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {learning.ingestion_error && (
@@ -183,10 +227,21 @@ export default function LearningDetail({ learning }: Props) {
                 </div>
               )}
 
-              {learning.ingestion_status === 'failed' && (
+              {isStuckUploaded && (
+                <div className="msg msg-error" style={{ background: 'rgba(245, 158, 11, 0.12)' }}>
+                  <span><AlertTriangle size={16} /></span>
+                  Analysis has not started yet. Ensure the background worker is running.
+                  We will retry automatically after 2 minutes, or use Retry analysis now.
+                </div>
+              )}
+
+              {showRetryAnalysis && (
                 <div>
-                  <Button onClick={() => dispatch(restartIngestion(learning.id))}>
-                    Retry analysis
+                  <Button
+                    disabled={reprocessing}
+                    onClick={() => dispatch(restartIngestion(learning.id))}
+                  >
+                    {reprocessing ? 'Retrying analysis…' : 'Retry analysis'}
                   </Button>
                 </div>
               )}

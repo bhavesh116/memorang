@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: memorang-temporal-ui-deploy-prod
+  labels:
+    app: memorang-temporal-ui-prod
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app: memorang-temporal-ui-prod
+  template:
+    metadata:
+      labels:
+        app: memorang-temporal-ui-prod
+    spec:
+      nodeSelector:
+        node-type: regular
+      containers:
+      - name: memorang-temporal-ui-prod
+        image: temporalio/ui:2.30.3
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8080
+          name: temp-ui-port
+        env:
+        - name: TEMPORAL_ADDRESS
+          value: temporal:7233
+        - name: TEMPORAL_CORS_ORIGINS
+          value: https://memorang-api-temporal.tickertom.com
+        readinessProbe:
+          httpGet:
+            path: /
+            port: temp-ui-port
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /
+            port: temp-ui-port
+          initialDelaySeconds: 20
+          periodSeconds: 20

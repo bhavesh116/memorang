@@ -188,7 +188,6 @@ export class LearningsService {
         pdf_blob_name: blobName,
         ingestion_status: 'uploaded',
         ingestion_progress_pct: 0,
-        ingestion_eta_seconds: null,
         ingestion_error: null,
         ingestion_started_at: null,
         ingestion_completed_at: null,

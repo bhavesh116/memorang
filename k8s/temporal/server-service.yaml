@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: temporal
+spec:
+  selector:
+    app: memorang-temporal-prod
+  ports:
+  - name: temporal-grpc
+    protocol: TCP
+    port: 7233
+    targetPort: temp-grpc-port

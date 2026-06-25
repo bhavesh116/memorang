@@ -60,21 +60,6 @@ export class LessonController {
     return result;
   }
 
-  @Post(':lessonId/questions/:questionId/hint')
-  async getHint(
-    @CurrentUser() user: AuthUser,
-    @Param('id') id: string,
-    @Param('lessonId') lessonId: string,
-    @Param('questionId') questionId: string,
-  ) {
-    return this.lessonService.getQuestionHint({
-      learningId: id,
-      userId: user.id,
-      lessonId,
-      questionId,
-    });
-  }
-
   @Post('chat/stream')
   async streamLessonCoach(
     @CurrentUser() user: AuthUser,

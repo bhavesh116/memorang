@@ -6,8 +6,9 @@ import {
   DocumentIntelligenceService,
   DocumentParagraph,
 } from '../../document-intelligence/document-intelligence.service';
+import { ImageClassificationService } from '../../image-classification/image-classification.service';
 import { SupabaseService } from '../../supabase/supabase.service';
-import { DocumentAnalysisSummary } from '../types';
+import { DocumentAnalysisSummary, DocumentIntelligenceSnapshot } from '../types';
 
 interface IngestionContext {
   learningId: string;
@@ -19,6 +20,7 @@ interface IngestionContext {
 interface PersistedImageRow {
   id: string;
   page_number: number | null;
+  is_instructional: boolean;
 }
 
 interface ChunkSeed {
@@ -36,6 +38,7 @@ export class DocumentActivities {
     private readonly documentIntelligenceService: DocumentIntelligenceService,
     private readonly azureOpenAiService: AzureOpenAiService,
     private readonly azureService: AzureService,
+    private readonly imageClassificationService: ImageClassificationService,
   ) {}
 
   async initializeIngestion(context: IngestionContext): Promise<void> {
@@ -43,7 +46,6 @@ export class DocumentActivities {
     await this.updateLearning(context.learningId, {
       ingestion_status: 'queued',
       ingestion_progress_pct: 5,
-      ingestion_eta_seconds: null,
       ingestion_error: null,
       ingestion_started_at: new Date().toISOString(),
       ingestion_completed_at: null,
@@ -56,24 +58,87 @@ export class DocumentActivities {
     await this.logEvent(context.learningId, 'queued', 'Document queued for ingestion');
   }
 
-  async analyzeDocument(context: IngestionContext): Promise<DocumentAnalysisSummary> {
+  async runDocumentIntelligence(
+    context: IngestionContext,
+  ): Promise<DocumentIntelligenceSnapshot> {
     await this.updateLearning(context.learningId, {
       ingestion_status: 'analyzing',
       ingestion_progress_pct: 15,
-      ingestion_eta_seconds: 180,
       ingestion_error: null,
     });
     await this.logEvent(context.learningId, 'analyzing', 'Document analysis started');
 
     const { operationLocation, result } =
-      await this.documentIntelligenceService.analyzePdfFromUrl(context.pdfUrl);
+      await this.documentIntelligenceService.analyzePdfFromUrl(
+        context.pdfUrl,
+        async ({ attempt, maxAttempts }) => {
+          await this.updateAnalyzingProgress(
+            context.learningId,
+            attempt,
+            maxAttempts,
+          );
+        },
+      );
 
     const pageCount = result.pages?.length ?? 0;
+    const figureCount = result.figures?.length ?? 0;
+    const analysisBlobName = await this.azureService.uploadIngestionCache(
+      context.userId,
+      context.learningId,
+      result,
+    );
+
+    await this.updateLearning(context.learningId, {
+      ingestion_status: 'analyzing',
+      ingestion_progress_pct: 55,
+      document_page_count: pageCount,
+    });
+
+    return {
+      operationLocation,
+      analysisBlobName,
+      pageCount,
+      figureCount,
+    };
+  }
+
+  async extractAndClassifyFigures(
+    context: IngestionContext,
+    snapshot: DocumentIntelligenceSnapshot,
+  ): Promise<number> {
+    const result = await this.azureService.downloadIngestionCache<DocumentAnalysisResult>(
+      snapshot.analysisBlobName,
+    );
+
     const images = await this.extractAndPersistImages(
       context,
       result,
-      operationLocation,
+      snapshot.operationLocation,
+      async (ratio) => {
+        const progress = 55 + Math.round(ratio * 4);
+
+        await this.updateLearning(context.learningId, {
+          ingestion_status: 'analyzing',
+          ingestion_progress_pct: progress,
+        });
+      },
     );
+
+    await this.updateLearning(context.learningId, {
+      document_image_count: images.length,
+    });
+
+    return images.length;
+  }
+
+  async persistDocumentChunks(
+    context: IngestionContext,
+    snapshot: DocumentIntelligenceSnapshot,
+  ): Promise<DocumentAnalysisSummary> {
+    const result = await this.azureService.downloadIngestionCache<DocumentAnalysisResult>(
+      snapshot.analysisBlobName,
+    );
+    const images = await this.loadPersistedImages(context.learningId);
     const chunks = this.buildChunks(result, images);
 
     if (chunks.length > 0) {
@@ -84,7 +149,10 @@ export class DocumentActivities {
         section_title: chunk.sectionTitle,
         chunk_text: chunk.chunkText,
         image_ids: images
-          .filter((image) => image.page_number === chunk.pageNumber)
+          .filter(
+            (image) =>
+              image.page_number === chunk.pageNumber && image.is_instructional,
+          )
           .map((image) => image.id),
         metadata: {
           pageNumber: chunk.pageNumber,
@@ -102,15 +170,16 @@ export class DocumentActivities {
     }
 
     const summary = {
-      pageCount,
+      pageCount: snapshot.pageCount,
       imageCount: images.length,
       chunkCount: chunks.length,
     };
 
+    await this.azureService.deleteIngestionCache(snapshot.analysisBlobName);
+
     await this.updateLearning(context.learningId, {
       ingestion_status: 'embedding',
       ingestion_progress_pct: 60,
-      ingestion_eta_seconds: this.estimateEmbeddingEta(chunks.length),
       document_page_count: summary.pageCount,
       document_image_count: summary.imageCount,
     });
@@ -122,6 +191,12 @@ export class DocumentActivities {
     );
 
     return summary;
+  }
+
+  async analyzeDocument(context: IngestionContext): Promise<DocumentAnalysisSummary> {
+    const snapshot = await this.runDocumentIntelligence(context);
+    await this.extractAndClassifyFigures(context, snapshot);
+    return this.persistDocumentChunks(context, snapshot);
   }
 
   async embedDocumentChunks(context: IngestionContext): Promise<number> {
@@ -138,7 +213,6 @@ export class DocumentActivities {
     if (!chunks || chunks.length === 0) {
       await this.updateLearning(context.learningId, {
         ingestion_progress_pct: 90,
-        ingestion_eta_seconds: 10,
       });
       return 0;
     }
@@ -152,32 +226,30 @@ export class DocumentActivities {
         batch.map((chunk) => String(chunk.chunk_text)),
       );
 
-      for (let batchIndex = 0; batchIndex < batch.length; batchIndex += 1) {
-        const chunk = batch[batchIndex];
-        const embedding = embeddings[batchIndex];
+      await Promise.all(
+        batch.map(async (chunk, batchIndex) => {
+          const embedding = embeddings[batchIndex];
+          const { error: updateError } = await this.supabaseService.client
+            .from('learning_document_chunks')
+            .update({
+              embedding: this.toVectorLiteral(embedding),
+            })
+            .eq('id', String(chunk.id));
 
-        const { error: updateError } = await this.supabaseService.client
-          .from('learning_document_chunks')
-          .update({
-            embedding: this.toVectorLiteral(embedding),
-          })
-          .eq('id', String(chunk.id));
-
-        if (updateError) {
-          throw new Error(
-            `Failed to persist embedding for chunk ${String(chunk.id)}: ${updateError.message}`,
-          );
-        }
-      }
+          if (updateError) {
+            throw new Error(
+              `Failed to persist embedding for chunk ${String(chunk.id)}: ${updateError.message}`,
+            );
+          }
+        }),
+      );
 
       completed += batch.length;
       const progress = 60 + Math.round((completed / chunks.length) * 35);
-      const remaining = Math.max(chunks.length - completed, 0);
 
       await this.updateLearning(context.learningId, {
         ingestion_status: 'embedding',
         ingestion_progress_pct: progress,
-        ingestion_eta_seconds: Math.max(remaining * 2, 5),
       });
     }
 
@@ -198,7 +270,6 @@ export class DocumentActivities {
     await this.updateLearning(context.learningId, {
       ingestion_status: 'completed',
       ingestion_progress_pct: 100,
-      ingestion_eta_seconds: 0,
       ingestion_error: null,
       ingestion_completed_at: new Date().toISOString(),
       document_page_count: summary.pageCount,
@@ -220,7 +291,6 @@ export class DocumentActivities {
     await this.updateLearning(context.learningId, {
       ingestion_status: 'failed',
       ingestion_error: errorMessage,
-      ingestion_eta_seconds: null,
       ingestion_progress_pct: 0,
     });
     await this.logEvent(context.learningId, 'failed', errorMessage);
@@ -272,6 +342,7 @@ export class DocumentActivities {
     context: IngestionContext,
     result: DocumentAnalysisResult,
     operationLocation: string,
+    onProgress?: (ratio: number) => void | Promise<void>,
   ): Promise<PersistedImageRow[]> {
     const figures = result.figures ?? [];
 
@@ -283,6 +354,113 @@ export class DocumentActivities {
       return [];
     }
 
+    const indexedFigures = figures
+      .map((figure, figureIndex) => ({ figure, figureIndex }))
+      .filter(({ figure }) => Boolean(figure.id));
+    const concurrency = this.getFigureExtractionConcurrency();
+    const extracted: Array<{
+      figureIndex: number;
+      row: {
+        learning_id: string;
+        page_number: number | null;
+        figure_id: string;
+        blob_name: string;
+        image_url: string;
+        caption: string | null;
+        metadata: Record<string, unknown>;
+      } | null;
+      pendingClassification: {
+        imageUrl: string;
+        caption: string | null;
+      } | null;
+    }> = [];
+
+    let downloadedCount = 0;
+    let uploadedCount = 0;
+    let missingCount = 0;
+    let processedCount = 0;
+
+    for (let batchStart = 0; batchStart < indexedFigures.length; batchStart += concurrency) {
+      const batch = indexedFigures.slice(batchStart, batchStart + concurrency);
+      const batchResults = await Promise.all(
+        batch.map(async ({ figure, figureIndex }) => {
+          try {
+            const figureBytes = await this.documentIntelligenceService.downloadFigure(
+              operationLocation,
+              figure.id!,
+            );
+
+            if (!figureBytes) {
+              missingCount += 1;
+              return { figureIndex, row: null, pendingClassification: null };
+            }
+
+            downloadedCount += 1;
+
+            const pageNumber = figure.boundingRegions?.[0]?.pageNumber ?? null;
+            const caption = figure.caption?.content ?? null;
+            const upload = await this.azureService.uploadImage(
+              context.userId,
+              context.learningId,
+              `figure-${figure.id}.png`,
+              figureBytes,
+              'image/png',
+            );
+
+            const heuristic = this.imageClassificationService.classifyByHeuristic(caption);
+            uploadedCount += 1;
+
+            const row = {
+              learning_id: context.learningId,
+              page_number: pageNumber,
+              figure_id: figure.id!,
+              blob_name: upload.blobName,
+              image_url: upload.sasUrl,
+              caption,
+              metadata: {
+                figureId: figure.id,
+                pageNumber,
+                ...(heuristic
+                  ? {
+                      is_instructional: heuristic.isInstructional,
+                      vision_description: heuristic.description,
+                      classification_source: heuristic.source,
+                    }
+                  : {}),
+              },
+            };
+
+            return {
+              figureIndex,
+              row,
+              pendingClassification: heuristic
+                ? null
+                : {
+                    imageUrl: upload.sasUrl,
+                    caption,
+                  },
+            };
+          } catch (error) {
+            this.logger.warn(
+              `Failed to extract figure ${figure.id} for learning ${context.learningId}: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            );
+            return { figureIndex, row: null, pendingClassification: null };
+          }
+        }),
+      );
+
+      extracted.push(...batchResults);
+      processedCount += batch.length;
+
+      if (onProgress && indexedFigures.length > 0) {
+        await onProgress(processedCount / indexedFigures.length);
+      }
+    }
+
+    extracted.sort((left, right) => left.figureIndex - right.figureIndex);
+
     const rows: Array<{
       learning_id: string;
       page_number: number | null;
@@ -292,56 +470,26 @@ export class DocumentActivities {
       caption: string | null;
       metadata: Record<string, unknown>;
     }> = [];
-    let downloadedCount = 0;
-    let uploadedCount = 0;
-    let missingCount = 0;
+    const pendingClassifications: Array<{
+      rowIndex: number;
+      imageUrl: string;
+      caption: string | null;
+    }> = [];
 
-    for (const figure of figures) {
-      if (!figure.id) {
+    for (const item of extracted) {
+      if (!item.row) {
         continue;
       }
 
-      try {
-        const figureBytes = await this.documentIntelligenceService.downloadFigure(
-          operationLocation,
-          figure.id,
-        );
+      const rowIndex = rows.length;
+      rows.push(item.row);
 
-        if (!figureBytes) {
-          missingCount += 1;
-          continue;
-        }
-
-        downloadedCount += 1;
-
-        const pageNumber = figure.boundingRegions?.[0]?.pageNumber ?? null;
-        const upload = await this.azureService.uploadImage(
-          context.userId,
-          context.learningId,
-          `figure-${figure.id}.png`,
-          figureBytes,
-          'image/png',
-        );
-
-        rows.push({
-          learning_id: context.learningId,
-          page_number: pageNumber,
-          figure_id: figure.id,
-          blob_name: upload.blobName,
-          image_url: upload.sasUrl,
-          caption: figure.caption?.content ?? null,
-          metadata: {
-            figureId: figure.id,
-            pageNumber,
-          },
+      if (item.pendingClassification) {
+        pendingClassifications.push({
+          rowIndex,
+          imageUrl: item.pendingClassification.imageUrl,
+          caption: item.pendingClassification.caption,
         });
-        uploadedCount += 1;
-      } catch (error) {
-        this.logger.warn(
-          `Failed to extract figure ${figure.id} for learning ${context.learningId}: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
       }
     }
 
@@ -352,20 +500,76 @@ export class DocumentActivities {
       return [];
     }
 
+    if (pendingClassifications.length > 0) {
+      this.logger.log(
+        `Classifying ${pendingClassifications.length} figures with vision for learning ${context.learningId}`,
+      );
+      const classifications =
+        await this.imageClassificationService.classifyImagesInBatches(
+          pendingClassifications.map((item) => ({
+            imageUrl: item.imageUrl,
+            caption: item.caption,
+          })),
+        );
+
+      pendingClassifications.forEach((item, index) => {
+        const classification = classifications[index];
+        rows[item.rowIndex].metadata = {
+          ...rows[item.rowIndex].metadata,
+          is_instructional: classification.isInstructional,
+          vision_description: classification.description,
+          classification_source: classification.source,
+        };
+      });
+    }
+
+    const instructionalCount = rows.filter(
+      (row) => row.metadata.is_instructional === true,
+    ).length;
     this.logger.log(
-      `Persisting ${rows.length} figure images for learning ${context.learningId}. Downloaded=${downloadedCount}, missing=${missingCount}, uploaded=${uploadedCount}`,
+      `Persisting ${rows.length} figure images for learning ${context.learningId}. Instructional=${instructionalCount}, decorative=${rows.length - instructionalCount}`,
     );
 
     const { data, error } = await this.supabaseService.client
       .from('learning_document_images')
       .insert(rows)
-      .select('id, page_number');
+      .select('id, page_number, metadata');
 
     if (error) {
       throw new Error(`Failed to persist extracted images: ${error.message}`);
     }
 
-    return (data ?? []) as PersistedImageRow[];
+    return (data ?? []).map((row) => ({
+      id: String(row.id),
+      page_number: row.page_number as number | null,
+      is_instructional: this.imageClassificationService.isInstructionalMetadata(
+        row.metadata as Record<string, unknown>,
+      ),
+    })) as PersistedImageRow[];
+  }
+
+  private async loadPersistedImages(learningId: string): Promise<PersistedImageRow[]> {
+    const { data, error } = await this.supabaseService.client
+      .from('learning_document_images')
+      .select('id, page_number, metadata')
+      .eq('learning_id', learningId);
+
+    if (error) {
+      throw new Error(`Failed to load extracted images: ${error.message}`);
+    }
+
+    return (data ?? []).map((row) => ({
+      id: String(row.id),
+      page_number: row.page_number as number | null,
+      is_instructional: this.imageClassificationService.isInstructionalMetadata(
+        row.metadata as Record<string, unknown>,
+      ),
+    }));
+  }
+
+  private getFigureExtractionConcurrency(): number {
+    const configured = Number(process.env.FIGURE_EXTRACTION_CONCURRENCY);
+    return Number.isFinite(configured) && configured > 0 ? configured : 12;
   }
 
   private buildChunks(
@@ -391,7 +595,7 @@ export class DocumentActivities {
           ?.content ?? null;
 
       const imageIds = images
-        .filter((image) => image.page_number === pageNumber)
+        .filter((image) => image.page_number === pageNumber && image.is_instructional)
         .map((image) => image.id);
 
       chunkSeeds.push(
@@ -403,6 +607,32 @@ export class DocumentActivities {
             : chunkText,
         })),
       );
+    }
+
+    const pagesWithChunks = new Set(chunkSeeds.map((chunk) => chunk.pageNumber));
+    const instructionalImagesByPage = new Map<number, number>();
+
+    for (const image of images) {
+      if (!image.is_instructional || !image.page_number) {
+        continue;
+      }
+
+      instructionalImagesByPage.set(
+        image.page_number,
+        (instructionalImagesByPage.get(image.page_number) ?? 0) + 1,
+      );
+    }
+
+    for (const [pageNumber, imageCount] of instructionalImagesByPage) {
+      if (pagesWithChunks.has(pageNumber)) {
+        continue;
+      }
+
+      chunkSeeds.push({
+        pageNumber,
+        sectionTitle: null,
+        chunkText: `This page contains ${imageCount} instructional figure(s) for visual identification, radiology interpretation, or diagram-based learning.`,
+      });
     }
 
     return chunkSeeds;
@@ -445,8 +675,20 @@ export class DocumentActivities {
     return chunks.filter(Boolean);
   }
 
-  private estimateEmbeddingEta(chunkCount: number): number {
-    return Math.max(chunkCount * 3, 15);
+  private async updateAnalyzingProgress(
+    learningId: string,
+    attempt: number,
+    maxAttempts: number,
+  ): Promise<void> {
+    const progressStart = 15;
+    const progressEnd = 55;
+    const ratio = Math.min(attempt / maxAttempts, 0.98);
+    const progress = Math.round(progressStart + ratio * (progressEnd - progressStart));
+
+    await this.updateLearning(learningId, {
+      ingestion_status: 'analyzing',
+      ingestion_progress_pct: progress,
+    });
   }
 
   private toVectorLiteral(embedding: number[]): string {

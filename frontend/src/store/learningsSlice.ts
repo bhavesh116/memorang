@@ -11,6 +11,7 @@ interface LearningsState {
   statusRefreshing: boolean;
   uploading: boolean;
   uploadProgress: number;
+  reprocessing: boolean;
   error: string | null;
 }
 
@@ -21,6 +22,7 @@ const initialState: LearningsState = {
   statusRefreshing: false,
   uploading: false,
   uploadProgress: 0,
+  reprocessing: false,
   error: null,
 };
 
@@ -205,14 +207,19 @@ const learningsSlice = createSlice({
       });
 
     builder
-      .addCase(restartIngestion.pending, (state) => { state.error = null; })
+      .addCase(restartIngestion.pending, (state) => {
+        state.error = null;
+        state.reprocessing = true;
+      })
       .addCase(restartIngestion.fulfilled, (state, action) => {
+        state.reprocessing = false;
         const idx = state.items.findIndex((l) => l.id === action.payload.id);
         if (idx !== -1) {
           state.items[idx] = action.payload;
         }
       })
       .addCase(restartIngestion.rejected, (state, action) => {
+        state.reprocessing = false;
         state.error = action.payload as string;
       });
 

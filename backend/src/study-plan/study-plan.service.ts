@@ -529,10 +529,14 @@ export class StudyPlanService {
 
     const { data: images } = await this.supabaseService.client
       .from('learning_document_images')
-      .select('page_number, caption')
+      .select('page_number, caption, metadata')
       .eq('learning_id', learningId)
       .order('page_number', { ascending: true })
       .limit(20);
+
+    const instructionalImages = (images ?? []).filter((image) =>
+      image.metadata?.is_instructional !== false,
+    );
 
     const chunkContext = (chunks ?? [])
       .map((chunk) =>
@@ -546,11 +550,15 @@ export class StudyPlanService {
       )
       .join('\n\n');
 
-    const imageContext = (images ?? [])
-      .map(
-        (image) =>
-          `Visual on page ${image.page_number ?? '?'}: ${image.caption ?? 'No caption available'}`,
-      )
+    const imageContext = instructionalImages
+      .map((image) => {
+        const description =
+          (typeof image.metadata?.vision_description === 'string' &&
+            image.metadata.vision_description.trim()) ||
+          image.caption?.trim() ||
+          'No description available';
+        return `Visual on page ${image.page_number ?? '?'}: ${description}`;
+      })
       .join('\n');
 
     return [chunkContext, imageContext].filter(Boolean).join('\n\n').slice(0, 24000);
