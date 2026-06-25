@@ -1,53 +1,35 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: memorang-frontend
-  namespace: memorang
+  name: memorang-frontend-deploy-prod
   labels:
-    app: memorang-frontend
+    app: memorang-frontend-prod
 spec:
   replicas: 2
+  strategy:
+    type: RollingUpdate
   selector:
     matchLabels:
-      app: memorang-frontend
+      app: memorang-frontend-prod
   template:
     metadata:
       labels:
-        app: memorang-frontend
+        app: memorang-frontend-prod
     spec:
-      imagePullSecrets:
-        - name: acr-secret
       nodeSelector:
-        kubernetes.io/arch: arm64
+        node-type: regular
+      imagePullSecrets:
+      - name: acr-secret
       containers:
-        - name: memorang-frontend
-          image: tickertom.azurecr.io/memorang-frontend:dev-ai
-          imagePullPolicy: Always
-          ports:
-            - containerPort: 80
-              name: http
-          env:
-            - name: DOPPLER_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: doppler-tokens
-                  key: FRONTEND_DOPPLER_TOKEN
-          resources:
-            requests:
-              cpu: "50m"
-              memory: "64Mi"
-            limits:
-              cpu: "200m"
-              memory: "128Mi"
-          readinessProbe:
-            httpGet:
-              path: /
-              port: http
-            initialDelaySeconds: 5
-            periodSeconds: 10
-          livenessProbe:
-            httpGet:
-              path: /
-              port: http
-            initialDelaySeconds: 10
-            periodSeconds: 20
+      - name: memorang-frontend-prod
+        image: tickertom.azurecr.io/memorang-frontend:latest
+        imagePullPolicy: Always
+        env:
+        - name: DOPPLER_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: doppler-tokens
+              key: FRONTEND_DOPPLER_TOKEN
+        ports:
+        - containerPort: 80
+          name: mem-fe-pod-port

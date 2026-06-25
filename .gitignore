@@ -71,6 +71,7 @@ Thumbs.db
 *.cer
 k8s/secrets/*.local.yaml
 k8s/secrets/*.generated.yaml
+k8s/secrets/doppler-tokens.yaml
 
 # ============================
 # Misc

@@ -1,7 +1,0 @@
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: memorang
-  labels:
-    app.kubernetes.io/name: memorang
-    app.kubernetes.io/part-of: memorang-platform

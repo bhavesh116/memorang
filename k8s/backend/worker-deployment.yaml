@@ -1,41 +1,35 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: memorang-worker
-  namespace: memorang
+  name: memorang-worker-deploy-prod
   labels:
-    app: memorang-worker
+    app: memorang-worker-prod
 spec:
   replicas: 1
+  strategy:
+    type: RollingUpdate
   selector:
     matchLabels:
-      app: memorang-worker
+      app: memorang-worker-prod
   template:
     metadata:
       labels:
-        app: memorang-worker
+        app: memorang-worker-prod
     spec:
-      imagePullSecrets:
-        - name: acr-secret
       nodeSelector:
-        kubernetes.io/arch: arm64
+        node-type: regular
+      imagePullSecrets:
+      - name: acr-secret
       containers:
-        - name: memorang-worker
-          image: tickertom.azurecr.io/memorang-backend:dev-ai
-          imagePullPolicy: Always
-          command: ["doppler", "run", "--", "node", "dist/temporal/worker"]
-          env:
-            - name: DOPPLER_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: doppler-tokens
-                  key: WORKER_DOPPLER_TOKEN
-            - name: NODE_ENV
-              value: production
-          resources:
-            requests:
-              cpu: "200m"
-              memory: "512Mi"
-            limits:
-              cpu: "1000m"
-              memory: "1Gi"
+      - name: memorang-worker-prod
+        image: tickertom.azurecr.io/memorang-backend:latest
+        imagePullPolicy: Always
+        command: ["doppler", "run", "--", "node", "dist/temporal/worker"]
+        env:
+        - name: DOPPLER_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: doppler-tokens
+              key: WORKER_DOPPLER_TOKEN
+        - name: NODE_ENV
+          value: production

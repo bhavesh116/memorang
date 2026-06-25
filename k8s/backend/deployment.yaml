@@ -1,57 +1,39 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: memorang-backend
-  namespace: memorang
+  name: memorang-backend-deploy-prod
   labels:
-    app: memorang-backend
+    app: memorang-backend-prod
 spec:
   replicas: 2
+  strategy:
+    type: RollingUpdate
   selector:
     matchLabels:
-      app: memorang-backend
+      app: memorang-backend-prod
   template:
     metadata:
       labels:
-        app: memorang-backend
+        app: memorang-backend-prod
     spec:
-      imagePullSecrets:
-        - name: acr-secret
       nodeSelector:
-        kubernetes.io/arch: arm64
+        node-type: regular
+      imagePullSecrets:
+      - name: acr-secret
       containers:
-        - name: memorang-backend
-          image: tickertom.azurecr.io/memorang-backend:dev-ai
-          imagePullPolicy: Always
-          ports:
-            - containerPort: 3001
-              name: http
-          env:
-            - name: DOPPLER_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: doppler-tokens
-                  key: BACKEND_DOPPLER_TOKEN
-            - name: NODE_ENV
-              value: production
-            - name: PORT
-              value: "3001"
-          resources:
-            requests:
-              cpu: "100m"
-              memory: "256Mi"
-            limits:
-              cpu: "500m"
-              memory: "512Mi"
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: http
-            initialDelaySeconds: 10
-            periodSeconds: 10
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: http
-            initialDelaySeconds: 20
-            periodSeconds: 20
+      - name: memorang-backend-prod
+        image: tickertom.azurecr.io/memorang-backend:latest
+        imagePullPolicy: Always
+        env:
+        - name: DOPPLER_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: doppler-tokens
+              key: BACKEND_DOPPLER_TOKEN
+        - name: NODE_ENV
+          value: production
+        - name: PORT
+          value: "3001"
+        ports:
+        - containerPort: 3001
+          name: mem-api-port

@@ -1,13 +1,12 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: memorang-backend
-  namespace: memorang
+  name: memorang-backend-svc-prod
 spec:
   selector:
-    app: memorang-backend
+    app: memorang-backend-prod
   ports:
-    - protocol: TCP
-      port: 80
-      targetPort: http
-  type: ClusterIP
+  - name: mem-api-svc-port
+    protocol: TCP
+    port: 80
+    targetPort: mem-api-port
