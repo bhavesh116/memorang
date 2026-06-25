@@ -31,7 +31,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd --system --gid 1001 nestjs && \
-    useradd --system --uid 1001 --gid nestjs nestjs
+    useradd --system --uid 1001 --gid nestjs --create-home --home-dir /home/nestjs nestjs
+
+ENV HOME=/home/nestjs
 
 COPY --from=builder --chown=nestjs:nestjs /app/dist ./dist
 COPY --from=builder --chown=nestjs:nestjs /app/node_modules ./node_modules

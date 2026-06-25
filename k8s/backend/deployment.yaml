@@ -32,6 +32,8 @@ spec:
               key: BACKEND_DOPPLER_TOKEN
         - name: NODE_ENV
           value: production
+        - name: HOME
+          value: /tmp
         - name: PORT
           value: "3001"
         ports:

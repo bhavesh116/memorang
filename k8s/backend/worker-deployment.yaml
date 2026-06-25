@@ -33,3 +33,5 @@ spec:
               key: WORKER_DOPPLER_TOKEN
         - name: NODE_ENV
           value: production
+        - name: HOME
+          value: /tmp
