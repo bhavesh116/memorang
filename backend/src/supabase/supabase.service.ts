@@ -1,5 +1,6 @@
 import { Injectable, OnModuleInit, Logger } from '@nestjs/common';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { WebSocket } from 'ws';
 import { AuthUser } from '../types/learning';
 
 @Injectable()
@@ -19,6 +20,7 @@ export class SupabaseService implements OnModuleInit {
 
     this._client = createClient(url, key, {
       auth: { autoRefreshToken: false, persistSession: false },
+      realtime: { transport: WebSocket as never },
     });
 
     this.logger.log('Supabase admin client initialized');

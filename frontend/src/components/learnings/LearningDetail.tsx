@@ -50,19 +50,6 @@ export default function LearningDetail({ learning }: Props) {
     return () => window.clearInterval(interval);
   }, [activeIngestion, dispatch, learning.id]);
 
-  const formatEta = (seconds?: number | null) => {
-    if (!seconds || seconds <= 0) {
-      return 'Calculating estimate…';
-    }
-
-    const minutes = Math.floor(seconds / 60);
-    const remainingSeconds = seconds % 60;
-    if (minutes === 0) {
-      return `~${remainingSeconds}s left`;
-    }
-    return `~${minutes}m ${remainingSeconds}s left`;
-  };
-
   const progress = Math.max(
     0,
     Math.min(100, Math.round(learning.ingestion_progress_pct ?? 0)),
@@ -138,15 +125,15 @@ export default function LearningDetail({ learning }: Props) {
                     {INGESTION_LABELS[learning.ingestion_status]}
                   </div>
                 </div>
-                <div style={{ textAlign: 'right', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                  {activeIngestion
-                    ? formatEta(learning.ingestion_eta_seconds)
-                    : learning.ingestion_status === 'completed'
-                    ? 'Ready for retrieval'
-                    : learning.ingestion_status === 'failed'
-                    ? 'Needs retry'
-                    : 'Waiting to start'}
-                </div>
+                {!activeIngestion && (
+                  <div style={{ textAlign: 'right', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                    {learning.ingestion_status === 'completed'
+                      ? 'Ready for retrieval'
+                      : learning.ingestion_status === 'failed'
+                      ? 'Needs retry'
+                      : 'Waiting to start'}
+                  </div>
+                )}
               </div>
 
               <div>

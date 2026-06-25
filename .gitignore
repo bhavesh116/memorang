@@ -58,7 +58,9 @@ Thumbs.db
 # ============================
 # Docker
 # ============================
-*.dockerignore
+# Keep .dockerignore files tracked for image builds
+!.dockerignore
+!**/.dockerignore
 
 # ============================
 # Secrets and certificates
