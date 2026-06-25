@@ -14,7 +14,9 @@ RUN npm run build
 FROM nginx:1.27-alpine AS runner
 
 RUN apk add --no-cache wget ca-certificates jq && \
-    wget -qO- https://cli.doppler.com/install.sh | sh
+    wget -q -t3 'https://packages.doppler.com/public/cli/rsa.8004D9FF50437357.key' -O /etc/apk/keys/cli@doppler-8004D9FF50437357.rsa.pub && \
+    echo 'https://packages.doppler.com/public/cli/alpine/any-version/main' | tee -a /etc/apk/repositories && \
+    apk add --no-cache doppler
 
 # Remove default nginx config
 RUN rm /etc/nginx/conf.d/default.conf
