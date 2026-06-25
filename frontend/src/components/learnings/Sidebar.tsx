@@ -1,21 +1,12 @@
-import { useState, useEffect } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
-import { useNavigate } from 'react-router-dom';
-import { Brain, Library, Trash2, LogOut, Clipboard, Hourglass, FileText, CheckCircle, GraduationCap, Trophy, Loader2, AlertTriangle } from 'lucide-react';
+import { useNavigate, useMatch } from 'react-router-dom';
+import { Brain, Library, Trash2, LogOut, Loader2, AlertTriangle } from 'lucide-react';
 import { RootState, AppDispatch } from '@/store';
-import { selectLearning, deleteLearning } from '@/store/learningsSlice';
-import { supabase } from '@/lib/supabase';
+import { deleteLearning } from '@/store/learningsSlice';
+import { useAuth } from '@/contexts/AuthContext';
+import { STAGE_ICONS } from '@/lib/stageIcons';
 import Badge from '@/components/ui/Badge';
 import { INGESTION_LABELS, type Learning } from '@/types/learning';
-
-const STAGE_ICONS: Record<string, React.ReactNode> = {
-  empty: <Clipboard size={18} />,
-  study_upload_pending: <Hourglass size={18} />,
-  study_uploaded: <FileText size={18} />,
-  user_approved_study: <CheckCircle size={18} />,
-  lesson_in_progress: <GraduationCap size={18} />,
-  lesson_complete: <Trophy size={18} />,
-};
 
 interface Props {
   onAddNew: () => void;
@@ -24,17 +15,12 @@ interface Props {
 export default function Sidebar({ onAddNew }: Props) {
   const dispatch = useDispatch<AppDispatch>();
   const navigate = useNavigate();
-  const { items, selectedId, loading } = useSelector((s: RootState) => s.learnings);
-  const [email, setEmail] = useState('');
-
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      setEmail(data.session?.user?.email ?? '');
-    });
-  }, []);
+  const { email, signOut } = useAuth();
+  const { items, loading } = useSelector((s: RootState) => s.learnings);
+  const learningMatch = useMatch('/dashboard/learnings/:id');
+  const selectedId = learningMatch?.params.id ?? null;
 
   const handleSelect = (learning: Learning) => {
-    dispatch(selectLearning(learning.id));
     navigate(`/dashboard/learnings/${learning.id}`);
   };
 
@@ -42,18 +28,15 @@ export default function Sidebar({ onAddNew }: Props) {
     e.stopPropagation();
     if (!window.confirm('Delete this learning? This cannot be undone.')) return;
     await dispatch(deleteLearning(id));
-    navigate('/dashboard');
-  };
-
-  const handleSignOut = async () => {
-    await supabase.auth.signOut();
+    if (selectedId === id) {
+      navigate('/dashboard');
+    }
   };
 
   const avatarLetter = email ? email[0].toUpperCase() : '?';
 
   return (
     <aside className="sidebar">
-      {/* ── Header ── */}
       <div className="sidebar-header">
         <div className="sidebar-brand">
           <div className="sidebar-brand-icon"><Brain size={24} /></div>
@@ -66,10 +49,8 @@ export default function Sidebar({ onAddNew }: Props) {
 
       <div className="sidebar-section-label">My Learnings</div>
 
-      {/* ── List ── */}
       <div className="sidebar-list">
         {loading && items.length === 0 ? (
-          // Skeleton loader
           [1, 2, 3].map((i) => (
             <div key={i} className="sidebar-item" style={{ cursor: 'default', gap: '0.625rem' }}>
               <div className="skeleton" style={{ width: 32, height: 32, flexShrink: 0, borderRadius: 8 }} />
@@ -140,12 +121,11 @@ export default function Sidebar({ onAddNew }: Props) {
         )}
       </div>
 
-      {/* ── Footer — user + sign out ── */}
       <div className="sidebar-footer">
         <button
           id="sidebar-signout-btn"
           className="sidebar-user"
-          onClick={handleSignOut}
+          onClick={() => void signOut()}
           title="Sign out"
         >
           <div className="sidebar-avatar">{avatarLetter}</div>

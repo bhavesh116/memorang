@@ -6,7 +6,6 @@ import { Learning } from '@/types/learning';
 
 interface LearningsState {
   items: Learning[];
-  selectedId: string | null;
   loading: boolean;
   statusRefreshing: boolean;
   uploading: boolean;
@@ -17,7 +16,6 @@ interface LearningsState {
 
 const initialState: LearningsState = {
   items: [],
-  selectedId: null,
   loading: false,
   statusRefreshing: false,
   uploading: false,
@@ -135,9 +133,6 @@ const learningsSlice = createSlice({
   name: 'learnings',
   initialState,
   reducers: {
-    selectLearning(state, action: PayloadAction<string | null>) {
-      state.selectedId = action.payload;
-    },
     clearError(state) {
       state.error = null;
     },
@@ -169,14 +164,12 @@ const learningsSlice = createSlice({
       .addCase(createLearning.fulfilled, (state, action) => {
         state.loading = false;
         state.items.unshift(action.payload);
-        state.selectedId = action.payload.id;
       })
       .addCase(createLearning.rejected, (state, action) => { state.loading = false; state.error = action.payload as string; });
 
     builder
       .addCase(deleteLearning.fulfilled, (state, action) => {
         state.items = state.items.filter((l) => l.id !== action.payload);
-        if (state.selectedId === action.payload) state.selectedId = null;
       })
       .addCase(deleteLearning.rejected, (state, action) => { state.error = action.payload as string; });
 
@@ -232,5 +225,5 @@ const learningsSlice = createSlice({
   },
 });
 
-export const { selectLearning, clearError, setUploadProgress } = learningsSlice.actions;
+export const { clearError, setUploadProgress } = learningsSlice.actions;
 export default learningsSlice.reducer;

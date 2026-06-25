@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
-import { AlertTriangle } from 'lucide-react';
 import { AppDispatch, RootState } from '@/store';
 import { createLearning } from '@/store/learningsSlice';
 import Modal from '@/components/ui/Modal';
 import Input from '@/components/ui/Input';
 import Button from '@/components/ui/Button';
+import ErrorAlert from '@/components/ui/ErrorAlert';
 
 interface Props {
   onClose: () => void;
@@ -52,11 +52,7 @@ export default function AddLearningModal({ onClose }: Props) {
         </>
       }
     >
-      {error && (
-        <div className="msg msg-error" style={{ marginBottom: '1rem' }}>
-          <span><AlertTriangle size={16} /></span> {error}
-        </div>
-      )}
+      {error && <ErrorAlert message={error} style={{ marginBottom: '1rem' }} />}
       <form id="add-learning-form" onSubmit={handleSubmit}>
         <Input
           label="Title *"

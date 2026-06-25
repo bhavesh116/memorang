@@ -1,12 +1,13 @@
 import { Navigate } from 'react-router-dom';
-import type { Session } from '@supabase/supabase-js';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface Props {
-  session: Session | null;
   children: React.ReactNode;
 }
 
-export default function ProtectedRoute({ session, children }: Props) {
+export default function ProtectedRoute({ children }: Props) {
+  const { session } = useAuth();
+
   if (!session) return <Navigate to="/login" replace />;
   return <>{children}</>;
 }

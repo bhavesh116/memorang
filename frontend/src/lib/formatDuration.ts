@@ -1,3 +1,8 @@
+export function formatDurationMs(ms: number): string {
+  if (!ms || ms <= 0) return '0s';
+  return formatDurationSeconds(Math.round(ms / 1000));
+}
+
 export function formatDurationSeconds(totalSeconds: number): string {
   const seconds = Math.max(0, Math.round(totalSeconds));
   if (seconds === 0) {

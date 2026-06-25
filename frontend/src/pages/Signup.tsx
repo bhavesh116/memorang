@@ -1,36 +1,19 @@
 import SignupForm from '@/components/auth/SignupForm';
-import { Brain, Sparkles, Lock, Zap } from 'lucide-react';
+import AuthLayout from '@/components/auth/AuthLayout';
+import { Sparkles, Lock, Zap } from 'lucide-react';
 
 export default function Signup() {
   return (
-    <div className="auth-root">
-      {/* Left hero panel */}
-      <div className="auth-hero">
-        <div className="auth-hero-content">
-          <div className="auth-hero-logo"><Brain size={48} /></div>
-          <h1>Start Learning</h1>
-          <p>
-            Join Memorang and let AI turn your study materials into interactive
-            lessons tailored just for you.
-          </p>
-          <div className="auth-hero-features">
-            <div className="auth-hero-feature">
-              <span><Sparkles size={20} /></span> Free to get started — no credit card
-            </div>
-            <div className="auth-hero-feature">
-              <span><Lock size={20} /></span> Your data is private and secure
-            </div>
-            <div className="auth-hero-feature">
-              <span><Zap size={20} /></span> Upload & start learning in minutes
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Right form panel */}
-      <div className="auth-form-panel">
-        <SignupForm />
-      </div>
-    </div>
+    <AuthLayout
+      title="Start Learning"
+      subtitle="Join Memorang and let AI turn your study materials into interactive lessons tailored just for you."
+      features={[
+        { icon: <Sparkles size={20} />, text: 'Free to get started — no credit card' },
+        { icon: <Lock size={20} />, text: 'Your data is private and secure' },
+        { icon: <Zap size={20} />, text: 'Upload & start learning in minutes' },
+      ]}
+    >
+      <SignupForm />
+    </AuthLayout>
   );
 }

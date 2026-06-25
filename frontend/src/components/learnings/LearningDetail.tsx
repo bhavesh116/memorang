@@ -8,19 +8,16 @@ import { useIngestionTiming } from '@/hooks/useIngestionTiming';
 import {
   FileText,
   BarChart,
-  Clipboard,
-  CheckCircle,
-  GraduationCap,
-  Trophy,
   Check,
   Image as ImageIcon,
   Loader2,
   AlertTriangle,
 } from 'lucide-react';
+import { STAGE_TIMELINE_ICONS } from '@/lib/stageIcons';
 import PdfUploadZone from './PdfUploadZone';
 import LessonWorkspace from './LessonWorkspace';
 import StudyPlanWorkspace from './StudyPlanWorkspace';
-import { INGESTION_LABELS, type Learning } from '@/types/learning';
+import { INGESTION_LABELS, type Learning, type LearningStage } from '@/types/learning';
 
 interface Props {
   learning: Learning;
@@ -286,17 +283,17 @@ export default function LearningDetail({ learning }: Props) {
 
 // ── Stage Timeline ──────────────────────────────────────────────────────────
 
-const stages = [
-  { key: 'empty',               label: 'Created',        icon: <Clipboard size={16} /> },
-  { key: 'study_uploaded',      label: 'PDF Uploaded',   icon: <FileText size={16} /> },
-  { key: 'user_approved_study', label: 'Plan Approved',  icon: <CheckCircle size={16} /> },
-  { key: 'lesson_in_progress',  label: 'Quiz',           icon: <GraduationCap size={16} /> },
-  { key: 'lesson_complete',     label: 'Complete',       icon: <Trophy size={16} /> },
-] as const;
+const stages: Array<{ key: LearningStage; label: string }> = [
+  { key: 'empty', label: 'Created' },
+  { key: 'study_uploaded', label: 'PDF Uploaded' },
+  { key: 'user_approved_study', label: 'Plan Approved' },
+  { key: 'lesson_in_progress', label: 'Quiz' },
+  { key: 'lesson_complete', label: 'Complete' },
+];
 
 function StageTimeline({ currentStage }: { currentStage: string }) {
   const stageOrder = stages.map((s) => s.key);
-  const currentIdx = stageOrder.indexOf(currentStage as typeof stages[number]['key']);
+  const currentIdx = stageOrder.indexOf(currentStage as LearningStage);
 
   return (
     <div style={{ display: 'flex', gap: '0', alignItems: 'stretch' }}>
@@ -351,7 +348,7 @@ function StageTimeline({ currentStage }: { currentStage: string }) {
                 transition: 'all 0.3s',
               }}
             >
-              {done ? <Check size={16} /> : stage.icon}
+              {done ? <Check size={16} /> : STAGE_TIMELINE_ICONS[stage.key]}
             </div>
 
             {/* Label */}

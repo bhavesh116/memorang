@@ -1,11 +1,13 @@
-import { useEffect } from 'react';
+import { useCallback, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useSelector, useDispatch } from 'react-redux';
 import { Search } from 'lucide-react';
 import { RootState, AppDispatch } from '@/store';
-import { fetchLearningById, fetchLearningStatus, selectLearning } from '@/store/learningsSlice';
+import { fetchLearningById, fetchLearningStatus } from '@/store/learningsSlice';
+import { usePolling } from '@/hooks/usePolling';
 import LearningDetail from '@/components/learnings/LearningDetail';
-import Spinner from '@/components/ui/Spinner';
+import LoadingScreen from '@/components/ui/LoadingScreen';
+import Button from '@/components/ui/Button';
 
 export default function LearningPage() {
   const { id } = useParams<{ id: string }>();
@@ -15,25 +17,13 @@ export default function LearningPage() {
   const { items, loading } = useSelector((s: RootState) => s.learnings);
   const learning = items.find((l) => l.id === id);
 
-  // Sync selected ID in Redux when navigating directly via URL
-  useEffect(() => {
-    if (id) dispatch(selectLearning(id));
-  }, [id, dispatch]);
-
-  // Always refresh status while this learning is open.
-  useEffect(() => {
-    if (!id) {
-      return undefined;
-    }
-
-    void dispatch(fetchLearningStatus(id));
-
-    const interval = window.setInterval(() => {
+  const refreshStatus = useCallback(() => {
+    if (id) {
       void dispatch(fetchLearningStatus(id));
-    }, 3000);
+    }
+  }, [dispatch, id]);
 
-    return () => window.clearInterval(interval);
-  }, [id, dispatch]);
+  usePolling(refreshStatus, 3000, Boolean(id));
 
   useEffect(() => {
     if (id && !learning) {
@@ -42,21 +32,7 @@ export default function LearningPage() {
   }, [dispatch, id, learning]);
 
   if (loading && !learning) {
-    return (
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          height: '100%',
-          gap: '0.75rem',
-          color: 'var(--text-muted)',
-        }}
-      >
-        <Spinner />
-        <span>Loading…</span>
-      </div>
-    );
+    return <LoadingScreen fullHeight={false} />;
   }
 
   if (!learning) {
@@ -74,12 +50,9 @@ export default function LearningPage() {
       >
         <span style={{ fontSize: '3rem' }}><Search size={48} /></span>
         <p>Learning not found.</p>
-        <button
-          className="btn btn-ghost btn-sm"
-          onClick={() => navigate('/dashboard')}
-        >
+        <Button variant="ghost" size="sm" onClick={() => navigate('/dashboard')}>
           ← Back to dashboard
-        </button>
+        </Button>
       </div>
     );
   }

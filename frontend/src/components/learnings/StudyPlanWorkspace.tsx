@@ -1,16 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useDispatch } from 'react-redux';
 import {
-  Bot,
   CheckCircle2,
   ChevronDown,
-  ChevronUp,
   Loader2,
   MessageSquare,
   RefreshCw,
-  SendHorizonal,
   Sparkles,
 } from 'lucide-react';
+import AgentChatPanel from '@/components/learnings/AgentChatPanel';
+import PlanTopicTree, { countIncludedTopics } from '@/components/learnings/PlanTopicTree';
 import Button from '@/components/ui/Button';
 import { AppDispatch } from '@/store';
 import { fetchLearningById } from '@/store/learningsSlice';
@@ -38,7 +37,6 @@ export default function StudyPlanWorkspace({ learning }: Props) {
     useState<StudyPlanDifficulty>('Intermediate');
   const [draft, setDraft] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [openTopics, setOpenTopics] = useState<Record<string, boolean>>({});
   const assistantDraftRef = useRef('');
 
   const shouldLoadWorkspace =
@@ -58,17 +56,8 @@ export default function StudyPlanWorkspace({ learning }: Props) {
 
   const plan = workspace?.plan ?? null;
   const messages = workspace?.messages ?? [];
-  const includedTopicCount = useMemo(
-    () => (plan?.topics ?? []).filter((topic) => topic.included).length,
-    [plan],
-  );
-  const includedSubtopicCount = useMemo(
-    () =>
-      (plan?.topics ?? []).reduce(
-        (count, topic) =>
-          count + topic.subtopics.filter((subtopic) => subtopic.included).length,
-        0,
-      ),
+  const { includedTopicCount, includedSubtopicCount } = useMemo(
+    () => countIncludedTopics(plan?.topics ?? []),
     [plan],
   );
   const canEditPlan = learning.plan_status !== 'approved';
@@ -78,20 +67,6 @@ export default function StudyPlanWorkspace({ learning }: Props) {
   const hasPendingDifficultyChange = plan
     ? selectedDifficulty !== displayedDifficulty
     : false;
-
-  useEffect(() => {
-    if (!plan) {
-      return;
-    }
-
-    setOpenTopics((current) => {
-      const nextState: Record<string, boolean> = {};
-      for (const topic of plan.topics) {
-        nextState[topic.id] = current[topic.id] ?? false;
-      }
-      return nextState;
-    });
-  }, [plan]);
 
   useEffect(() => {
     if (plan?.difficulty) {
@@ -319,13 +294,6 @@ export default function StudyPlanWorkspace({ learning }: Props) {
     void sendChat();
   }
 
-  function toggleTopic(topicId: string) {
-    setOpenTopics((current) => ({
-      ...current,
-      [topicId]: !current[topicId],
-    }));
-  }
-
   if (!shouldLoadWorkspace) {
     return null;
   }
@@ -513,134 +481,35 @@ export default function StudyPlanWorkspace({ learning }: Props) {
               </div>
             </div>
 
-            <div className="study-plan-topics">
-              {plan.topics.map((topic) => (
-                <div key={topic.id} className="study-plan-topic-card">
-                  <div className="study-plan-topic-header">
-                    <label className="study-plan-checkbox-row">
-                      <input
-                        type="checkbox"
-                        checked={topic.included}
-                        onChange={(event) =>
-                          void updateTopic(topic.id, event.target.checked)
-                        }
-                      />
-                      <div>
-                        <div className="study-plan-topic-title">{topic.title}</div>
-                        {topic.description && (
-                          <div className="study-plan-topic-description">
-                            {topic.description}
-                          </div>
-                        )}
-                      </div>
-                    </label>
-                    <button
-                      type="button"
-                      className="study-plan-toggle"
-                      onClick={() => toggleTopic(topic.id)}
-                      aria-label={
-                        openTopics[topic.id]
-                          ? `Collapse ${topic.title}`
-                          : `Expand ${topic.title}`
-                      }
-                    >
-                      {openTopics[topic.id] ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-                    </button>
-                  </div>
-                  {openTopics[topic.id] && (
-                    <div className="study-plan-subtopics">
-                      {topic.subtopics.map((subtopic) => (
-                        <label key={subtopic.id} className="study-plan-checkbox-row subtopic">
-                          <input
-                            type="checkbox"
-                            checked={subtopic.included}
-                            onChange={(event) =>
-                              void updateSubtopic(subtopic.id, event.target.checked)
-                            }
-                          />
-                          <div>
-                            <div className="study-plan-subtopic-title">
-                              {subtopic.title}
-                            </div>
-                            {subtopic.description && (
-                              <div className="study-plan-subtopic-description">
-                                {subtopic.description}
-                              </div>
-                            )}
-                          </div>
-                        </label>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
+            <PlanTopicTree
+              topics={plan.topics}
+              onTopicChange={updateTopic}
+              onSubtopicChange={updateSubtopic}
+            />
           </div>
 
           <div className="study-plan-column">
-            <div className="study-chat-card">
-              <div className="study-chat-header">
+            <AgentChatPanel
+              title="Chat With The Agent"
+              helperText="Ask to focus on or omit topics before approval."
+              emptyText="Ask the agent to focus on selected topics, omit sections, or explain what each topic covers."
+              assistantLabel="Agent"
+              placeholder="Example: I only want to learn imaging anatomy, pathology patterns, and fracture interpretation."
+              composerHelperText="Streaming replies are saved, so refreshes will not lose the conversation."
+              messages={messages}
+              draft={draft}
+              error={error}
+              streaming={streaming}
+              onDraftChange={setDraft}
+              onSend={() => void sendChat()}
+              onKeyDown={handleComposerKeyDown}
+              headerExtra={
                 <div className="study-chat-title">
                   <MessageSquare size={16} />
                   <span>Chat With The Agent</span>
                 </div>
-                <span className="study-chat-helper">
-                  Ask to focus on or omit topics before approval.
-                </span>
-              </div>
-
-              <div className="study-chat-messages">
-                {messages.length === 0 ? (
-                  <div className="study-chat-empty">
-                    <Bot size={18} />
-                    <span>
-                      Ask the agent to focus on selected topics, omit sections, or
-                      explain what each topic covers.
-                    </span>
-                  </div>
-                ) : (
-                  messages.map((message) => (
-                    <div
-                      key={message.id}
-                      className={`study-chat-message study-chat-message-${message.role}`}
-                    >
-                      <div className="study-chat-role">
-                        {message.role === 'assistant' ? 'Agent' : 'You'}
-                      </div>
-                      <div className="study-chat-content">{message.content}</div>
-                    </div>
-                  ))
-                )}
-              </div>
-
-              <div className="study-chat-composer">
-                <textarea
-                  className="input study-chat-textarea"
-                  placeholder="Example: I only want to learn imaging anatomy, pathology patterns, and fracture interpretation."
-                  value={draft}
-                  onChange={(event) => setDraft(event.target.value)}
-                  onKeyDown={handleComposerKeyDown}
-                  disabled={streaming}
-                />
-                <div className="study-chat-composer-footer">
-                  {error ? (
-                    <span className="study-chat-error">{error}</span>
-                  ) : (
-                    <span className="study-chat-helper">
-                      Streaming replies are saved, so refreshes will not lose the conversation.
-                    </span>
-                  )}
-                  <Button
-                    loading={streaming}
-                    onClick={sendChat}
-                    disabled={streaming || !draft.trim()}
-                  >
-                    {!streaming ? <SendHorizonal size={16} /> : null}
-                    Send
-                  </Button>
-                </div>
-              </div>
-            </div>
+              }
+            />
           </div>
         </div>
       )}
