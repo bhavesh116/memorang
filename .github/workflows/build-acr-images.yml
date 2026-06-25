@@ -45,7 +45,6 @@ jobs:
   build-frontend:
     name: Build frontend image
     needs: changes
-    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -108,7 +107,6 @@ jobs:
   build-backend:
     name: Build backend image
     needs: changes
-    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
 
     steps:
